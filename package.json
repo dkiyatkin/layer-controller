@@ -1,0 +1,35 @@
+{
+  "name": "layer-controller",
+  "version": "0.0.0",
+  "description": "JavaScript layer controller. Manage layers.",
+  "main": "./dist/layer-controller.min.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "gulp test",
+    "make": "gulp make"
+  },
+  "keywords": [
+    "layer",
+    "controller"
+  ],
+  "author": "Dmitriy Kiyatkin <info@dkiyatkin.com> (http://dkiyatkin.com)",
+  "license": "MIT",
+  "devDependencies": {
+    "coffee-script": "^1.8.0",
+    "gulp": "^3.8.7",
+    "gulp-coffee": "^2.2.0",
+    "gulp-mocha": "^1.0.0",
+    "gulp-util": "^3.0.1",
+    "mocha": "^1.21.4",
+    "mustache": "^0.8.2"
+  },
+  "dependencies": {
+    "bluebird": "^2.3.2",
+    "cheerio": "^0.17.0",
+    "eventemitter2": "^0.4.14",
+    "lodash": "^2.4.1",
+    "superagent": "^0.18.2"
+  }
+}
