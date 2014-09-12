@@ -2,6 +2,7 @@ _ = require('lodash')
 Promise = require('bluebird')
 superagent = require('superagent')
 EventEmitter2 = require('eventemitter2').EventEmitter2
+pasteHTML = require('./pasteHTML')
 
 class LayerController extends EventEmitter2
   # Выполнить все события
@@ -61,7 +62,7 @@ class LayerController extends EventEmitter2
         reject(err)
 
   # Рендер шаблона
-  render: (tpl = '') ->
+  render: (tpl = '') -> # TODO
     tpl = tpl + ''
     # return mustache.render(tpl, @) if tpl.indexOf('{{') >= 0
     tpl
@@ -126,6 +127,7 @@ class LayerController extends EventEmitter2
   # @return {?Promise} layer
   load: ->
     return @busy.load if @busy.load
+    return Promise.resolve(this) if @data?
 
     @busy.load = new Promise (resolve, reject) =>
       emits = []
@@ -150,24 +152,122 @@ class LayerController extends EventEmitter2
         delete @busy.load
         reject(err)
 
+  reparse: -> # TODO
+
+  # Распарсить шаблон (layer.data.tpl) слоя в html (layer.html), если уже распарсен, то ничего не делать
+  # @return {Promise} layer
   parse: ->
-  reparse: ->
+    return @busy.parse if @busy.parse
+    return Promise.resolve(this) if @html?
+
+    @busy.parse = new Promise (resolve, reject) =>
+      emits = []
+      emits.push(@emitAll('parse'))
+
+      Promise.all(emits).then (emits) =>
+        for success in emits when not success
+          delete @busy.parse
+          return resolve(null)
+        @html = @render(@data.tpl)
+        emits = []
+        emits.push(@emitAll('parsed'))
+
+        Promise.all(emits).then (emits) =>
+          delete @busy.parse
+          for success in emits when not success
+            @html = null # XXX нужно ли это?
+            return resolve(null)
+          resolve(this)
+
+      .then null, (err) =>
+        delete @busy.parse
+        reject(err)
 
   # Загрузить, распарсить слой. Приготовить для вставки
   # @return {Promise} layer
   make: -> # load parse
-    Promise.resolve(this)
+    return @busy.make if @busy.make
+
+    @busy.make = new Promise (resolve, reject) =>
+      emits = []
+      emits.push(@emitAll('make'))
+
+      Promise.all(emits).then (emits) =>
+        for success in emits when not success
+          delete @busy.make
+          return resolve(null)
+
+        @load().then (layer) =>
+          if not layer
+            delete @busy.make
+            return resolve(null)
+
+          @parse().then (layer) =>
+            if not layer
+              delete @busy.make
+              return resolve(null)
+            emits = []
+            emits.push(@emitAll('made'))
+
+            Promise.all(emits).then (emits) =>
+              delete @busy.make
+              for success in emits when not success
+                return resolve(null)
+              resolve(this)
+
+      .then null, (err) =>
+        delete @busy.make
+        reject(err)
 
   # Вставить слой
   # @return {Promise} layer
   insert: ->
-    Promise.resolve(this)
+    return @busy.insert if @busy.insert
+
+    @busy.insert = new Promise (resolve, reject) =>
+      emits = []
+      emits.push(@emitAll('insert'))
+
+      Promise.all(emits).then (emits) =>
+        for success in emits when not success
+          delete @busy.insert
+          return resolve(null)
+        @elementList = null
+        if @parentNode.find and @parentNode.html
+          elementList = @parentNode.find(@selectors)
+          if elementList.length
+            elementList.html(@html)
+            @elementList = elementList
+        else
+          elementList = @parentNode.querySelectorAll(@selectors)
+          if elementList.length
+            Array::forEach.call elementList, (element) =>
+              pasteHTML(element, @html) # element.innerHTML = @html
+
+            @elementList = elementList
+        if not @elementList
+          delete @busy.insert
+          return resolve(null)
+        emits = []
+        emits.push(@emitAll('inserted'))
+        emits.push(@emitAll('domready'))
+
+        Promise.all(emits).then (emits) =>
+          delete @busy.insert
+          for success in emits when not success
+            @elementList = null # XXX нужно ли это?
+            return resolve(null)
+          resolve(this)
+
+      .then null, (err) =>
+        delete @busy.insert
+        reject(err)
 
   # Показать слой (загрузить, распарсить, вставить), если он не показан. Если слой показан, ничего не делать
   # @return {Promise} layer
   show: ->
-    return Promise.resolve(this) if @isShown
     return @busy.show if @busy.show
+    return Promise.resolve(this) if @isShown
 
     @busy.show = new Promise (resolve, reject) =>
       emits = []
@@ -191,8 +291,8 @@ class LayerController extends EventEmitter2
             emits.push(@emitAll('shown'))
 
             Promise.all(emits).then (emits) =>
+              delete @busy.show
               for success in emits when not success
-                delete @busy.show
                 return resolve(null)
               @isShown = true
               resolve(this)
@@ -203,8 +303,9 @@ class LayerController extends EventEmitter2
 
   # Скрыть слой, не скрывает дочерние слои, их нужно скрывать вручную в первую очередь
   # @return {Promise} layer
-  hide: ->
-    delete @isShown
+  hide: -> # TODO
+    @isShown = false
+    @elementList = null
     Promise.resolve(this)
 
   # Скрыть или показать слой в зависимости от состояния layer.regState
@@ -263,11 +364,12 @@ class LayerController extends EventEmitter2
 
   # Очистка данных слоя
   # @param {String|Boolean} cacheKey
-  reset: (cacheKey) ->
+  reset: (cacheKey) -> # TODO
 
   constructor: (parentLayer) ->
     super wildcard: true
     if parentLayer instanceof LayerController # определение @main
+      @parentLayer = parentLayer
       @main = parentLayer.main
       @request = @main.request
       @layers = @main.layers
@@ -282,6 +384,7 @@ class LayerController extends EventEmitter2
     @busy = {}
     @config = {}
     @rel = {}
+    # TODO name, parentNode
 
 LayerController._ = _
 LayerController.Promise = Promise
