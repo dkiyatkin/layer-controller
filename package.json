@@ -17,6 +17,7 @@
   "author": "Dmitriy Kiyatkin <info@dkiyatkin.com> (http://dkiyatkin.com)",
   "license": "MIT",
   "devDependencies": {
+    "cheerio": "^0.17.0",
     "coffee-script": "^1.8.0",
     "gulp": "^3.8.7",
     "gulp-coffee": "^2.2.0",
@@ -27,7 +28,6 @@
   },
   "dependencies": {
     "bluebird": "^2.3.2",
-    "cheerio": "^0.17.0",
     "eventemitter2": "^0.4.14",
     "lodash": "^2.4.1",
     "superagent": "^0.18.2"

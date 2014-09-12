@@ -2,7 +2,7 @@ assert = require('assert')
 LayerController = require('../src/layer-controller')
 
 describe 'events', ->
-  it 'parallel callbacks', (testDone)->
+  it 'parallel callbacks', (testDone) ->
     layer = new LayerController()
     a = 0
 
@@ -36,7 +36,7 @@ describe 'events', ->
     , (err) ->
       testDone(err)
 
-  it 'stop callbacks', (testDone)->
+  it 'stop callbacks', (testDone) ->
     layer = new LayerController()
     a = 0
 
@@ -67,7 +67,7 @@ describe 'events', ->
     , (err) ->
       testDone(err)
 
-  it 'error callbacks', (testDone)->
+  it 'error callbacks', (testDone) ->
     layer = new LayerController()
     a = 0
 
@@ -99,7 +99,7 @@ describe 'events', ->
       assert.equal true, err instanceof Error
       testDone()
 
-  it 'throw callbacks', (testDone)->
+  it 'throw callbacks', (testDone) ->
     layer = new LayerController()
     a = 0
 
@@ -130,4 +130,54 @@ describe 'events', ->
     , (err) ->
       assert.equal 3, ++a
       assert.strictEqual true, err instanceof Error
+      testDone()
+
+  it 'multiple runs', (testDone) ->
+    layer = new LayerController()
+
+    layer.test(42).then (_layer) ->
+      assert.strictEqual _layer, layer
+      assert.equal 1, layer.testCount
+
+    layer.test(42).then (_layer) ->
+      assert.strictEqual _layer, layer
+      assert.equal 1, layer.testCount
+
+      layer.test(42).then (_layer) ->
+        assert.equal 2, layer.testCount
+        testDone()
+
+  it 'multiple runs and errors', (testDone) ->
+    layer = new LayerController()
+    a = 0
+
+    layer.on 'test', (done) ->
+      throw 2
+      done()
+
+    layer.test(42).then (layer) ->
+      assert.ok(false)
+
+    .then null, ->
+      assert.equal 1, ++a
+
+    layer.test(42).then (layer) ->
+      assert.ok(false)
+
+    .then null, ->
+      assert.equal 2, ++a
+      testDone()
+
+  it 'multiple runs and stop', (testDone) ->
+    layer = new LayerController()
+    a = 0
+
+    layer.on 'test', (done) ->
+      done(false)
+
+    layer.test(42).then (layer) ->
+      assert.strictEqual null, layer
+
+    layer.test(42).then (layer) ->
+      assert.strictEqual null, layer
       testDone()
