@@ -128,6 +128,7 @@ class LayerController extends EventEmitter2
   load: ->
     return @busy.load if @busy.load
     return Promise.resolve(this) if @data?
+    return Promise.reject(new Error("layer.download does not exist: #{@name}")) if not @download
 
     @busy.load = new Promise (resolve, reject) =>
       emits = []
@@ -159,6 +160,7 @@ class LayerController extends EventEmitter2
   parse: ->
     return @busy.parse if @busy.parse
     return Promise.resolve(this) if @html?
+    return Promise.reject(new Error("layer.data.tpl does not exist: #{@name}")) if not @data?.tpl?
 
     @busy.parse = new Promise (resolve, reject) =>
       emits = []
@@ -183,9 +185,22 @@ class LayerController extends EventEmitter2
         delete @busy.parse
         reject(err)
 
-  # Загрузить, распарсить слой. Приготовить для вставки
+  # Загрузить, распарсить слой
   # @return {Promise} layer
-  make: -> # load parse
+  _make: -> # load parse
+    if @download
+      @load().then (layer) =>
+        return null if not layer
+        return this if not @data?.tpl?
+        @parse()
+
+    else
+      return Promise.resolve(this) if not @data?.tpl?
+      @parse()
+
+  # Загрузить, распарсить слой
+  # @return {Promise} layer
+  make: ->
     return @busy.make if @busy.make
 
     @busy.make = new Promise (resolve, reject) =>
@@ -197,32 +212,45 @@ class LayerController extends EventEmitter2
           delete @busy.make
           return resolve(null)
 
-        @load().then (layer) =>
+        @_make().then (layer) =>
           if not layer
             delete @busy.make
             return resolve(null)
+          emits = []
+          emits.push(@emitAll('made'))
 
-          @parse().then (layer) =>
-            if not layer
-              delete @busy.make
+          Promise.all(emits).then (emits) =>
+            delete @busy.make
+            for success in emits when not success
               return resolve(null)
-            emits = []
-            emits.push(@emitAll('made'))
-
-            Promise.all(emits).then (emits) =>
-              delete @busy.make
-              for success in emits when not success
-                return resolve(null)
-              resolve(this)
+            resolve(this)
 
       .then null, (err) =>
         delete @busy.make
         reject(err)
 
-  # Вставить слой
+  # Найти список элементов
+  # @param {Node|NodeList} node
+  # @param {String} selectors
+  # @return {?NodeList} elementList
+  findElements: (node, selectors) ->
+    return null if not node or not selectors
+    return node.find(selectors) if node.find
+    node.querySelectorAll(selectors)
+
+  # Вставить html в список элементов
+  # @param {NodeList} elementList
+  # @param {String} html
+  htmlElements: (elementList, html = '') ->
+    return elementList.html(html) if elementList.html
+    Array::forEach.call elementList, (element) ->
+      pasteHTML(element, html) # element.innerHTML = @html
+
+  # Вставить слой, нет обработки если слой заместит какой-то другой слой
   # @return {Promise} layer
   insert: ->
     return @busy.insert if @busy.insert
+    return Promise.reject(new Error("layer.selectors does not exist: #{@name}")) if not @selectors
 
     @busy.insert = new Promise (resolve, reject) =>
       emits = []
@@ -232,22 +260,14 @@ class LayerController extends EventEmitter2
         for success in emits when not success
           delete @busy.insert
           return resolve(null)
-        @elementList = null
-        if @parentNode.find and @parentNode.html
-          elementList = @parentNode.find(@selectors)
-          if elementList.length
-            elementList.html(@html)
-            @elementList = elementList
-        else
-          elementList = @parentNode.querySelectorAll(@selectors)
-          if elementList.length
-            Array::forEach.call elementList, (element) =>
-              pasteHTML(element, @html) # element.innerHTML = @html
 
-            @elementList = elementList
-        if not @elementList
+        @elementList = null
+        elementList = @findElements(@parentNode or @parentLayer?.elementList, @selectors)
+        if not elementList?.length
           delete @busy.insert
           return resolve(null)
+        @htmlElements(elementList, @html)
+        @elementList = elementList
         emits = []
         emits.push(@emitAll('inserted'))
         emits.push(@emitAll('domready'))
@@ -255,7 +275,7 @@ class LayerController extends EventEmitter2
         Promise.all(emits).then (emits) =>
           delete @busy.insert
           for success in emits when not success
-            @elementList = null # XXX нужно ли это?
+            # @elementList = null # XXX нужно ли это? # hide может перестать работать
             return resolve(null)
           resolve(this)
 
@@ -301,26 +321,83 @@ class LayerController extends EventEmitter2
         delete @busy.show
         reject(err)
 
-  # Скрыть слой, не скрывает дочерние слои, их нужно скрывать вручную в первую очередь
+  # Скрыть слой
+  # @param {Boolean} childLayers Скрыть все дочерние слои
   # @return {Promise} layer
-  hide: -> # TODO
-    @isShown = false
-    @elementList = null
-    Promise.resolve(this)
+  _hide: (childLayers = true) ->
+    if not childLayers
+      @htmlElements(@elementList, '')
+      return Promise.resolve(this)
+    _all = []
+    for _layer in @childLayers
+      _all.push(_layer.hide(childLayers))
+
+    Promise.all(_all).then (layers) =>
+      @htmlElements(@elementList, '')
+      this
+
+  # Скрыть слой
+  # @param {Boolean} childLayers Скрыть все дочерние слои
+  # @return {Promise} layer
+  hide: (childLayers = true) ->
+    return @busy.hide if @busy.hide
+    Promise.resolve(this) if not @isShown and not @elementList
+
+    @busy.hide = new Promise (resolve, reject) =>
+      emits = []
+      emits.push(@emitAll('hide'))
+
+      Promise.all(emits).then (emits) =>
+        for success in emits when not success
+          delete @busy.hide
+          return resolve(null)
+
+        @_hide(childLayers).then (layer) =>
+          if not layer
+            delete @busy.hide
+            return resolve(null)
+          @isShown = false
+          @elementList = null
+          emits = []
+          emits.push(@emitAll('hidden'))
+
+          Promise.all(emits).then (emits) =>
+            delete @busy.hide
+            for success in emits when not success
+              return resolve(null)
+            resolve(this)
+
+      .then null, (err) =>
+        delete @busy.hide
+        reject(err)
 
   # Скрыть или показать слой в зависимости от состояния layer.regState
+  # @param {String} state Состояние для слоя
+  # @param {Boolean} childLayers
   # @return {Promise} layer
-  _state: (state) ->
+  _state: (state, childLayers) ->
+    return Promise.resolve(this) if not @selectors # XXX @selectors не очень очевидно
     if not @regState or (state.search(@regState) != -1)
       delete @isShown
-      @show()
+      return @show() if not childLayers
+
+      @show().then (layer) =>
+        return null if not layer
+        _all = []
+        for _layer in @childLayers
+          _all.push(_layer.state(state))
+
+        Promise.all(_all).then (layers) => # не важно если не все покажутся
+          this
+
     else
-      @hide()
+      @hide(childLayers)
 
   # Привести слой к состоянию
   # @param {String} state Состояние для слоя
+  # @param {Boolean} childLayers
   # @return {Promise} layer
-  state: (state = '') ->
+  state: (state = '', childLayers) ->
     @busy.state = {queue: []} if not @busy.state
     if @busy.state.run # если уже идет state
       pushed = @busy.state.queue.push(state)
@@ -342,7 +419,7 @@ class LayerController extends EventEmitter2
           delete @busy.state.run
           return resolve(null)
 
-        @_state(state).then (layer) =>
+        @_state(state, childLayers).then (layer) =>
           if not layer # слой не вставился
             delete @busy.state.run
             return resolve(null)
@@ -368,23 +445,28 @@ class LayerController extends EventEmitter2
 
   constructor: (parentLayer) ->
     super wildcard: true
-    if parentLayer instanceof LayerController # определение @main
+    @childLayers = []
+    if parentLayer instanceof LayerController # определение layer.main
       @parentLayer = parentLayer
+      @parentLayer.childLayers.push(this)
       @main = parentLayer.main
       @request = @main.request
       @layers = @main.layers
+      @layers.push(this)
+      @name = "#{@layers.length}/#{@parentLayer.childLayers.length}" if not @name
+      @name = @parentLayer.name + '.' + @name
     else # main слой без parentLayer
       @main = this
+      @parentNode = document if document?
       @main.request = {}
       @main.request.agent = superagent.agent()
       @main.request.loading = {} # загружаемые адреса и их Promise
       @main.request.cache = {}
-      @main.layers = []
-    @layers.push(this)
+      @main.layers = [this]
+      @main.name = 'main' if not @main.name
     @busy = {}
     @config = {}
     @rel = {}
-    # TODO name, parentNode
 
 LayerController._ = _
 LayerController.Promise = Promise

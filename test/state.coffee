@@ -42,5 +42,5 @@ describe 'state', ->
 
     layer.state().then (_layer) ->
       assert.equal 1, ++a
-      console.log $('#one_layer').html()
+      assert.strictEqual($('#one_layer').html(), '123')
       testDone()
