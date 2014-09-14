@@ -62,18 +62,19 @@ class LayerController extends EventEmitter2
         reject(err)
 
   # Рендер шаблона
-  render: (tpl = '') -> # TODO
-    tpl = tpl + ''
-    # return mustache.render(tpl, @) if tpl.indexOf('{{') >= 0
-    tpl
+  # @param {String} tpl Шаблон
+  # @return {String} text Готовый текст
+  render: (tpl) ->
+    _.template(tpl, this)
 
   # Загрузить данные для слоя
   # @param {String|Arrya|Object} path данные для загрузки
-  # param {Object} data Объект для сохранения
-  # param {?String} key Ключ по которому будут сохранены данные
+  # @param {Object} data Объект для сохранения
+  # @param {?String} key Ключ по которому будут сохранены данные
   # @return {?Promise} data
   _load: (path, key, data) ->
     @data = {} if not @data
+    @_data = {} if not @_data
     if not path
       path = @download
       data = @data
@@ -95,10 +96,12 @@ class LayerController extends EventEmitter2
 
       @request.loading[path].then (res) =>
         delete @request.loading[path]
+        return console.error("Error: layer #{@name}: load #{path}:", res.error?.message or res.error) if res.error
         if res.body and Object.keys(res.body).length
           @request.cache[path] = res.body
         else
           @request.cache[path] = res.text
+        @_data[path] = @request.cache[path]
         return @request.cache[path] if not (key? and data)
         data[key] = @request.cache[path]
         return data
@@ -153,7 +156,22 @@ class LayerController extends EventEmitter2
         delete @busy.load
         reject(err)
 
-  reparse: -> # TODO
+  # Перерисовать слой
+  # @param {Boolean} childLayers Перерисовать все дочерние слои
+  # @return {Promise} layer
+  reparse: (childLayers = true) ->
+    _all = []
+    if childLayers
+      for _layer in @childLayers
+        _all.push(_layer.reparse(childLayers))
+
+    Promise.all(_all).then (layers) => # перепарсить дочерние слои сначала
+      @make().then (layer) =>
+        return null if not layer
+
+        @insert().then (layer) =>
+          return null if not layer
+          this
 
   # Распарсить шаблон (layer.data.tpl) слоя в html (layer.html), если уже распарсен, то ничего не делать
   # @return {Promise} layer
@@ -191,7 +209,7 @@ class LayerController extends EventEmitter2
     if @download
       @load().then (layer) =>
         return null if not layer
-        return this if not @data?.tpl?
+        # return this if not @data?.tpl?
         @parse()
 
     else
@@ -385,7 +403,7 @@ class LayerController extends EventEmitter2
         return null if not layer
         _all = []
         for _layer in @childLayers
-          _all.push(_layer.state(state))
+          _all.push(_layer.state(state, childLayers))
 
         Promise.all(_all).then (layers) => # не важно если не все покажутся
           this
@@ -439,9 +457,27 @@ class LayerController extends EventEmitter2
         delete @busy.state.run
         reject(err)
 
-  # Очистка данных слоя
+  # Очистка слоя от временных данных
   # @param {String|Boolean} cacheKey
-  reset: (cacheKey) -> # TODO
+  # @return {Boolean} success
+  reset: (cacheKey) ->
+    delete @html
+    # delete @elementList # hide может перестать работать
+    delete @data
+    return true if not cacheKey
+    return false if not @_data or not @download
+    if _.isString(cacheKey)
+      path = @render(@download[cacheKey])
+      return false if not path
+      delete @_data[path]
+      delete @request.cache[path]
+      return true
+    if _.isBoolean(cacheKey) # удалить все связанные загрузки
+      for own path, data of @_data
+        delete @_data[path]
+        delete @request.cache[path]
+      return true
+    false
 
   constructor: (parentLayer) ->
     super wildcard: true
@@ -459,7 +495,10 @@ class LayerController extends EventEmitter2
       @main = this
       @parentNode = document if document?
       @main.request = {}
-      @main.request.agent = superagent.agent()
+      if window?
+        @main.request.origin =
+          window.location.origin or window.location.protocol + '//' + window.location.hostname + (if window.location.port then ':' + window.location.port else '')
+      @main.request.agent = superagent
       @main.request.loading = {} # загружаемые адреса и их Promise
       @main.request.cache = {}
       @main.layers = [this]
