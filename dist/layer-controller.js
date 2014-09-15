@@ -1,4 +1,4 @@
-var EventEmitter2, LayerController, Promise, pasteHTML, superagent, _,
+var EventEmitter2, LayerController, Log, Promise, pasteHTML, superagent, _,
   __hasProp = {}.hasOwnProperty,
   __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
   __slice = [].slice;
@@ -12,6 +12,8 @@ superagent = require('superagent');
 EventEmitter2 = require('eventemitter2').EventEmitter2;
 
 pasteHTML = require('./pasteHTML');
+
+Log = require('./log');
 
 LayerController = (function(_super) {
   __extends(LayerController, _super);
@@ -79,6 +81,7 @@ LayerController = (function(_super) {
             _this.testCount = 0;
           }
           _this.testCount++;
+          _this.log.debug('test action');
           emits = [];
           emits.push(_this.emitAll('tested', testValue));
           if (testValue === 24) {
@@ -109,6 +112,7 @@ LayerController = (function(_super) {
 
   LayerController.prototype._load = function(path, key, data) {
     var paths, _key, _path;
+    this.log.debug('_load', path, key, data);
     if (!this.data) {
       this.data = {};
     }
@@ -140,6 +144,7 @@ LayerController = (function(_super) {
         if (this.request.headers) {
           this.request.loading[path].set(this.request.headers);
         }
+        this.request.loading[path].set('x-layer-controller-proxy', 'true');
         this.request.loading[path] = Promise.promisify(this.request.loading[path].end, this.request.loading[path])();
       }
       return this.request.loading[path].then((function(_this) {
@@ -147,7 +152,8 @@ LayerController = (function(_super) {
           var _ref;
           delete _this.request.loading[path];
           if (res.error) {
-            return console.error("Error: layer " + _this.name + ": load " + path + ":", ((_ref = res.error) != null ? _ref.message : void 0) || res.error);
+            _this.log.error("load " + path + ":", ((_ref = res.error) != null ? _ref.message : void 0) || res.error);
+            return;
           }
           if (res.body && Object.keys(res.body).length) {
             _this.request.cache[path] = res.body;
@@ -255,12 +261,7 @@ LayerController = (function(_super) {
           if (!layer) {
             return null;
           }
-          return _this.insert().then(function(layer) {
-            if (!layer) {
-              return null;
-            }
-            return _this;
-          });
+          return _this.insert();
         });
       };
     })(this));
@@ -382,13 +383,32 @@ LayerController = (function(_super) {
   };
 
   LayerController.prototype.findElements = function(node, selectors) {
+    var element, elementList, _i, _len, _ref, _ref1;
+    if (node == null) {
+      node = this.parentNode || ((_ref = this.parentLayer) != null ? _ref.elementList : void 0);
+    }
+    if (selectors == null) {
+      selectors = this.selectors;
+    }
+    this.log.debug('findElements');
     if (!node || !selectors) {
       return null;
     }
-    if (node.find) {
+    if (node.find && node.html) {
       return node.find(selectors);
     }
-    return node.querySelectorAll(selectors);
+    if (node.querySelectorAll) {
+      return node.querySelectorAll(selectors);
+    }
+    if (!((_ref1 = node[0]) != null ? _ref1.querySelectorAll : void 0)) {
+      return null;
+    }
+    elementList = [];
+    for (_i = 0, _len = node.length; _i < _len; _i++) {
+      element = node[_i];
+      elementList = elementList.concat(_.toArray(element.querySelectorAll(selectors)));
+    }
+    return elementList;
   };
 
   LayerController.prototype.htmlElements = function(elementList, html) {
@@ -403,12 +423,15 @@ LayerController = (function(_super) {
     });
   };
 
-  LayerController.prototype.insert = function() {
+  LayerController.prototype.insert = function(force) {
+    if (force == null) {
+      force = true;
+    }
     if (this.busy.insert) {
       return this.busy.insert;
     }
     if (!this.selectors) {
-      return Promise.reject(new Error("layer.selectors does not exist: " + this.name));
+      return Promise.reject(new Error(this.log.error('layer.selectors does not exist')));
     }
     return this.busy.insert = new Promise((function(_this) {
       return function(resolve, reject) {
@@ -425,14 +448,16 @@ LayerController = (function(_super) {
             delete _this.busy.insert;
             return resolve(null);
           }
-          _this.elementList = null;
-          elementList = _this.findElements(_this.parentNode || ((_ref = _this.parentLayer) != null ? _ref.elementList : void 0), _this.selectors);
-          if (!(elementList != null ? elementList.length : void 0)) {
-            delete _this.busy.insert;
-            return resolve(null);
+          if (!(!force && ((_ref = _this.elementList) != null ? _ref.length : void 0))) {
+            _this.elementList = null;
+            elementList = _this.findElements();
+            if (!(elementList != null ? elementList.length : void 0)) {
+              delete _this.busy.insert;
+              return resolve(null);
+            }
+            _this.htmlElements(elementList, _this.html);
+            _this.elementList = elementList;
           }
-          _this.htmlElements(elementList, _this.html);
-          _this.elementList = elementList;
           emits = [];
           emits.push(_this.emitAll('inserted'));
           emits.push(_this.emitAll('domready'));
@@ -455,7 +480,36 @@ LayerController = (function(_super) {
     })(this));
   };
 
-  LayerController.prototype.show = function() {
+  LayerController.prototype._show = function(childLayers) {
+    return this.make().then((function(_this) {
+      return function(layer) {
+        var _ref, _ref1;
+        if (!layer) {
+          return null;
+        }
+        if (!childLayers) {
+          return _this.insert(!((_ref = _this.elementList) != null ? _ref.length : void 0));
+        }
+        return _this.insert(!((_ref1 = _this.elementList) != null ? _ref1.length : void 0)).then(function(layer) {
+          var _all, _i, _layer, _len, _ref1;
+          if (!layer) {
+            return null;
+          }
+          _all = [];
+          _ref1 = _this.childLayers;
+          for (_i = 0, _len = _ref1.length; _i < _len; _i++) {
+            _layer = _ref1[_i];
+            _all.push(_layer.show(childLayers));
+          }
+          return Promise.all(_all).then(function(layers) {
+            return _this;
+          });
+        });
+      };
+    })(this));
+  };
+
+  LayerController.prototype.show = function(childLayers) {
     if (this.busy.show) {
       return this.busy.show;
     }
@@ -477,30 +531,25 @@ LayerController = (function(_super) {
             delete _this.busy.show;
             return resolve(null);
           }
-          return _this.make().then(function(layer) {
+          return _this._show(childLayers).then(function(layer) {
             if (!layer) {
               delete _this.busy.show;
               return resolve(null);
             }
-            return _this.insert().then(function(layer) {
-              if (!layer) {
-                delete _this.busy.show;
-                return resolve(null);
-              }
-              emits = [];
-              emits.push(_this.emitAll('shown'));
-              return Promise.all(emits).then(function(emits) {
-                var _j, _len1;
-                delete _this.busy.show;
-                for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
-                  success = emits[_j];
-                  if (!success) {
-                    return resolve(null);
-                  }
+            emits = [];
+            emits.push(_this.emitAll('showed'));
+            emits.push(_this.emitAll('shown'));
+            return Promise.all(emits).then(function(emits) {
+              var _j, _len1;
+              delete _this.busy.show;
+              for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
+                success = emits[_j];
+                if (!success) {
+                  return resolve(null);
                 }
-                _this.isShown = true;
-                return resolve(_this);
-              });
+              }
+              _this.isShown = true;
+              return resolve(_this);
             });
           });
         }).then(null, function(err) {
@@ -593,7 +642,6 @@ LayerController = (function(_super) {
       return Promise.resolve(this);
     }
     if (!this.regState || (state.search(this.regState) !== -1)) {
-      delete this.isShown;
       if (!childLayers) {
         return this.show();
       }
@@ -646,9 +694,12 @@ LayerController = (function(_super) {
         var emits;
         _this.state.next = state;
         _this.state.equal = (_this.state.current === _this.state.next ? true : false);
-        _this.state.progress = (_this.state.current && !_this.state.equal ? true : false);
+        _this.state.progress = ((_this.state.current != null) && !_this.state.equal ? true : false);
         emits = [];
         emits.push(_this.emitAll('state'));
+        if (_this.state.current != null) {
+          emits.push(_this.emitAll('state.next'));
+        }
         return Promise.all(emits).then(function(emits) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
@@ -754,6 +805,7 @@ LayerController = (function(_super) {
         this.main.name = 'main';
       }
     }
+    this.log = new Log(this);
     this.busy = {};
     this.config = {};
     this.rel = {};
