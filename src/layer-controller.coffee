@@ -69,7 +69,7 @@ class LayerController extends EventEmitter2
     _.template(tpl, this)
 
   # Загрузить данные для слоя
-  # @param {String|Arrya|Object} path данные для загрузки
+  # @param {String|Array|Object} path данные для загрузки
   # @param {Object} data Объект для сохранения
   # @param {?String} key Ключ по которому будут сохранены данные
   # @return {?Promise} data
@@ -136,7 +136,7 @@ class LayerController extends EventEmitter2
   load: ->
     return @busy.load if @busy.load
     return Promise.resolve(this) if @data?
-    return Promise.reject(new Error("layer.download does not exist: #{@name}")) if not @download
+    return Promise.reject(new Error(@log.error('layer.download does not exist'))) if not @download
 
     @busy.load = new Promise (resolve, reject) =>
       emits = []
@@ -180,7 +180,7 @@ class LayerController extends EventEmitter2
   parse: ->
     return @busy.parse if @busy.parse
     return Promise.resolve(this) if @html?
-    return Promise.reject(new Error("layer.data.tpl does not exist: #{@name}")) if not @data?.tpl?
+    return Promise.reject(new Error(@log.error('layer.data.tpl does not exist'))) if not @data?.tpl?
 
     @busy.parse = new Promise (resolve, reject) =>
       emits = []
@@ -249,16 +249,17 @@ class LayerController extends EventEmitter2
         delete @busy.make
         reject(err)
 
-  # Найти список элементов
+  # Найти список элементов, если аргументы не переданы ищет список элементов слоя
   # @param {Node|NodeList} node
   # @param {String} selectors
-  # @return {?NodeList} elementList
-  findElements: (node = @parentNode or @parentLayer?.elementList, selectors = @selectors) -> # XXX null vs error vs [], elementList vs isShown
+  # @return {NodeList|Array} elementList
+  findElements: (node = @parentNode or @parentLayer?.elementList, selectors = @selectors) ->
     @log.debug 'findElements' #, node, selectors
-    return null if not node or not selectors
+    throw new Error(@log.error('findElements: node does not exist')) if not node
+    throw new Error(@log.error('findElements: selectors does not exist')) if not selectors
     return node.find(selectors) if node.find and node.html # у массивов может быть свой find
-    return node.querySelectorAll(selectors) if node.querySelectorAll
-    return null if not node[0]?.querySelectorAll
+    return _.toArray(node.querySelectorAll(selectors)) if node.querySelectorAll
+    throw new Error(@log.error('findElements: bad node')) if not node[0]?.querySelectorAll
     elementList = []
     for element in node
       elementList = elementList.concat(_.toArray(element.querySelectorAll(selectors)))
@@ -267,8 +268,11 @@ class LayerController extends EventEmitter2
   # Вставить html в список элементов
   # @param {NodeList} elementList
   # @param {String} html
-  htmlElements: (elementList, html = '') ->
+  htmlElements: (elementList, html) ->
+    throw new Error(@log.error('htmlElements: elementList does not exist')) if not elementList
+    throw new Error(@log.error('htmlElements: html does not exist')) if not html
     return elementList.html(html) if elementList.html
+
     Array::forEach.call elementList, (element) ->
       pasteHTML(element, html) # element.innerHTML = @html
 
@@ -298,11 +302,13 @@ class LayerController extends EventEmitter2
         emits = []
         emits.push(@emitAll('inserted'))
         emits.push(@emitAll('domready'))
+        emits.push(@emitAll('inserted.window')) if window?
+        emits.push(@emitAll('domready.window')) if window?
 
         Promise.all(emits).then (emits) =>
           delete @busy.insert
           for success in emits when not success
-            # @elementList = null # XXX нужно ли это? # hide может перестать работать
+            @elementList = null
             return resolve(null)
           resolve(this)
 
@@ -332,7 +338,7 @@ class LayerController extends EventEmitter2
   # @return {Promise} layer
   show: (childLayers) ->
     return @busy.show if @busy.show
-    return Promise.resolve(this) if @isShown
+    return Promise.resolve(this) if @isShown and @elementList?.length
 
     @busy.show = new Promise (resolve, reject) =>
       emits = []
@@ -417,6 +423,7 @@ class LayerController extends EventEmitter2
   # @param {Boolean} childLayers
   # @return {Promise} layer
   _state: (state, childLayers) ->
+    @log.debug('_state', state, childLayers)
     return Promise.resolve(this) if not @selectors # XXX @selectors не очень очевидно
     if not @regState or (state.search(@regState) != -1)
       # delete @isShown # XXX нужно или нет?
@@ -439,6 +446,7 @@ class LayerController extends EventEmitter2
   # @param {Boolean} childLayers
   # @return {Promise} layer
   state: (state = '', childLayers) ->
+    @log.debug('state', state, childLayers)
     @busy.state = {queue: []} if not @busy.state
     if @busy.state.run # если уже идет state
       pushed = @busy.state.queue.push(state)
@@ -449,12 +457,15 @@ class LayerController extends EventEmitter2
         @busy.state.run = @state(state)
 
     @busy.state.run = new Promise (resolve, reject) =>
-      @state.next = state
-      @state.equal = (if @state.current is @state.next then true else false)
-      @state.progress = (if @state.current? and not @state.equal then true else false)
+      @log.debug('state run')
+      @busy.state.next = state
+      @busy.state.equal = (if @busy.state.current is @busy.state.next then true else false)
+      @busy.state.progress = (if @busy.state.current? and not @busy.state.equal then true else false)
       emits = []
       emits.push(@emitAll('state'))
-      emits.push(@emitAll('state.next')) if @state.current? # не в первый раз
+      emits.push(@emitAll('state.next')) if @busy.state.current? # не в первый раз
+      emits.push(@emitAll('state.different')) if not @busy.state.equal # состояния разные
+      emits.push(@emitAll('state.progress')) if @busy.state.progress # не в первый раз и состояния разные
 
       Promise.all(emits).then (emits) =>
         for success in emits when not success
@@ -465,9 +476,9 @@ class LayerController extends EventEmitter2
           if not layer # слой не вставился
             delete @busy.state.run
             return resolve(null)
-          @state.last = @state.current
-          @state.current = state
-          delete @state.next
+          @busy.state.last = @busy.state.current
+          @busy.state.current = state
+          delete @busy.state.next
           emits = []
           emits.push(@emitAll('stated'))
 
@@ -486,7 +497,7 @@ class LayerController extends EventEmitter2
   # @return {Boolean} success
   reset: (cacheKey) ->
     delete @html
-    # delete @elementList # hide может перестать работать
+    delete @elementList # слой может быть isShown, но elementList сбрасываем
     delete @data
     return true if not cacheKey
     return false if not @_data or not @download
@@ -528,6 +539,7 @@ class LayerController extends EventEmitter2
       @main.layers = [this]
       @main.name = 'main' if not @main.name
     @log = new Log(this)
+    @log.debug('new')
     @busy = {}
     @config = {}
     @rel = {}
@@ -536,4 +548,6 @@ LayerController._ = _
 LayerController.Promise = Promise
 LayerController.superagent = superagent
 LayerController.EventEmitter2 = EventEmitter2
+LayerController.pasteHTML = pasteHTML
+LayerController.Log = Log
 module.exports = LayerController

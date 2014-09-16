@@ -202,7 +202,7 @@ LayerController = (function(_super) {
       return Promise.resolve(this);
     }
     if (!this.download) {
-      return Promise.reject(new Error("layer.download does not exist: " + this.name));
+      return Promise.reject(new Error(this.log.error('layer.download does not exist')));
     }
     return this.busy.load = new Promise((function(_this) {
       return function(resolve, reject) {
@@ -276,7 +276,7 @@ LayerController = (function(_super) {
       return Promise.resolve(this);
     }
     if (((_ref = this.data) != null ? _ref.tpl : void 0) == null) {
-      return Promise.reject(new Error("layer.data.tpl does not exist: " + this.name));
+      return Promise.reject(new Error(this.log.error('layer.data.tpl does not exist')));
     }
     return this.busy.parse = new Promise((function(_this) {
       return function(resolve, reject) {
@@ -391,17 +391,20 @@ LayerController = (function(_super) {
       selectors = this.selectors;
     }
     this.log.debug('findElements');
-    if (!node || !selectors) {
-      return null;
+    if (!node) {
+      throw new Error(this.log.error('findElements: node does not exist'));
+    }
+    if (!selectors) {
+      throw new Error(this.log.error('findElements: selectors does not exist'));
     }
     if (node.find && node.html) {
       return node.find(selectors);
     }
     if (node.querySelectorAll) {
-      return node.querySelectorAll(selectors);
+      return _.toArray(node.querySelectorAll(selectors));
     }
     if (!((_ref1 = node[0]) != null ? _ref1.querySelectorAll : void 0)) {
-      return null;
+      throw new Error(this.log.error('findElements: bad node'));
     }
     elementList = [];
     for (_i = 0, _len = node.length; _i < _len; _i++) {
@@ -412,8 +415,11 @@ LayerController = (function(_super) {
   };
 
   LayerController.prototype.htmlElements = function(elementList, html) {
-    if (html == null) {
-      html = '';
+    if (!elementList) {
+      throw new Error(this.log.error('htmlElements: elementList does not exist'));
+    }
+    if (!html) {
+      throw new Error(this.log.error('htmlElements: html does not exist'));
     }
     if (elementList.html) {
       return elementList.html(html);
@@ -461,14 +467,22 @@ LayerController = (function(_super) {
           emits = [];
           emits.push(_this.emitAll('inserted'));
           emits.push(_this.emitAll('domready'));
+          if (typeof window !== "undefined" && window !== null) {
+            emits.push(_this.emitAll('inserted.window'));
+          }
+          if (typeof window !== "undefined" && window !== null) {
+            emits.push(_this.emitAll('domready.window'));
+          }
           return Promise.all(emits).then(function(emits) {
             var _j, _len1;
             delete _this.busy.insert;
             for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
               success = emits[_j];
-              if (!success) {
-                return resolve(null);
+              if (!(!success)) {
+                continue;
               }
+              _this.elementList = null;
+              return resolve(null);
             }
             return resolve(_this);
           });
@@ -510,10 +524,11 @@ LayerController = (function(_super) {
   };
 
   LayerController.prototype.show = function(childLayers) {
+    var _ref;
     if (this.busy.show) {
       return this.busy.show;
     }
-    if (this.isShown) {
+    if (this.isShown && ((_ref = this.elementList) != null ? _ref.length : void 0)) {
       return Promise.resolve(this);
     }
     return this.busy.show = new Promise((function(_this) {
@@ -638,6 +653,7 @@ LayerController = (function(_super) {
   };
 
   LayerController.prototype._state = function(state, childLayers) {
+    this.log.debug('_state', state, childLayers);
     if (!this.selectors) {
       return Promise.resolve(this);
     }
@@ -672,6 +688,7 @@ LayerController = (function(_super) {
     if (state == null) {
       state = '';
     }
+    this.log.debug('state', state, childLayers);
     if (!this.busy.state) {
       this.busy.state = {
         queue: []
@@ -692,13 +709,20 @@ LayerController = (function(_super) {
     return this.busy.state.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
-        _this.state.next = state;
-        _this.state.equal = (_this.state.current === _this.state.next ? true : false);
-        _this.state.progress = ((_this.state.current != null) && !_this.state.equal ? true : false);
+        _this.log.debug('state run');
+        _this.busy.state.next = state;
+        _this.busy.state.equal = (_this.busy.state.current === _this.busy.state.next ? true : false);
+        _this.busy.state.progress = ((_this.busy.state.current != null) && !_this.busy.state.equal ? true : false);
         emits = [];
         emits.push(_this.emitAll('state'));
-        if (_this.state.current != null) {
+        if (_this.busy.state.current != null) {
           emits.push(_this.emitAll('state.next'));
+        }
+        if (!_this.busy.state.equal) {
+          emits.push(_this.emitAll('state.different'));
+        }
+        if (_this.busy.state.progress) {
+          emits.push(_this.emitAll('state.progress'));
         }
         return Promise.all(emits).then(function(emits) {
           var success, _i, _len;
@@ -715,9 +739,9 @@ LayerController = (function(_super) {
               delete _this.busy.state.run;
               return resolve(null);
             }
-            _this.state.last = _this.state.current;
-            _this.state.current = state;
-            delete _this.state.next;
+            _this.busy.state.last = _this.busy.state.current;
+            _this.busy.state.current = state;
+            delete _this.busy.state.next;
             emits = [];
             emits.push(_this.emitAll('stated'));
             return Promise.all(emits).then(function(emits) {
@@ -743,6 +767,7 @@ LayerController = (function(_super) {
   LayerController.prototype.reset = function(cacheKey) {
     var data, path, _ref;
     delete this.html;
+    delete this.elementList;
     delete this.data;
     if (!cacheKey) {
       return true;
@@ -806,6 +831,7 @@ LayerController = (function(_super) {
       }
     }
     this.log = new Log(this);
+    this.log.debug('new');
     this.busy = {};
     this.config = {};
     this.rel = {};
@@ -822,5 +848,9 @@ LayerController.Promise = Promise;
 LayerController.superagent = superagent;
 
 LayerController.EventEmitter2 = EventEmitter2;
+
+LayerController.pasteHTML = pasteHTML;
+
+LayerController.Log = Log;
 
 module.exports = LayerController;

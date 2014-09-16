@@ -1,5 +1,13 @@
 # Сообщения для отладки и для ошибок
 
+colour = require('colour')
+colour.setTheme({
+  DEBUG: 'blue'
+  INFO: 'green'
+  WARN: 'yellow'
+  ERROR: 'red bold'
+})
+
 class Log
   # @param {Array} msg
   # @param {Number} level
@@ -7,8 +15,9 @@ class Log
   _log: (msg, level) ->
     msg = msg.join(' ')
     log = "[#{new Date().toISOString()}] #{@levels[level]} layer #{@layer.name}: #{msg}"
+    colorLog = log[@levels[level]] if not window?
     if @levels.indexOf(@level) <= level
-      (console[@levels[level].toLowerCase()] or console.log)(log) # console.debug nodejs нету
+      (console[@levels[level].toLowerCase()] or console.log).call(console, colorLog or log) # console.debug nodejs нету
     @history += log + '\n'
     log
 
@@ -35,4 +44,5 @@ class Log
     @level = 'DEBUG'
     @history = ''
 
+Log.colour = colour
 module.exports = Log
