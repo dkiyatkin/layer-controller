@@ -1,4 +1,4 @@
-var EventEmitter2, LayerController, Log, Promise, pasteHTML, superagent, _,
+var LayerController, Log, Module, Promise, pasteHTML, superagent, _,
   __hasProp = {}.hasOwnProperty,
   __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
   __slice = [].slice;
@@ -9,7 +9,7 @@ Promise = require('bluebird');
 
 superagent = require('superagent');
 
-EventEmitter2 = require('eventemitter2').EventEmitter2;
+Module = require('./module');
 
 pasteHTML = require('./pasteHTML');
 
@@ -112,7 +112,6 @@ LayerController = (function(_super) {
 
   LayerController.prototype._load = function(path, key, data) {
     var paths, _key, _path;
-    this.log.debug('_load', path, key, data);
     if (!this.data) {
       this.data = {};
     }
@@ -798,6 +797,7 @@ LayerController = (function(_super) {
   };
 
   function LayerController(parentLayer) {
+    var _name;
     LayerController.__super__.constructor.call(this, {
       wildcard: true
     });
@@ -812,6 +812,7 @@ LayerController = (function(_super) {
       if (!this.name) {
         this.name = "" + this.layers.length + "/" + this.parentLayer.childLayers.length;
       }
+      _name = this.name;
       this.name = this.parentLayer.name + '.' + this.name;
     } else {
       this.main = this;
@@ -826,20 +827,20 @@ LayerController = (function(_super) {
       this.main.request.loading = {};
       this.main.request.cache = {};
       this.main.layers = [this];
-      if (!this.main.name) {
-        this.main.name = 'main';
-      }
+      this.main.name = (parentLayer != null ? parentLayer.name : void 0) || this.main.name || 'main';
+      _name = this.main.name;
     }
     this.log = new Log(this);
     this.log.debug('new');
     this.busy = {};
     this.config = {};
     this.rel = {};
+    LayerController.emit("init." + _name, this);
   }
 
   return LayerController;
 
-})(EventEmitter2);
+})(Module);
 
 LayerController._ = _;
 
@@ -847,10 +848,14 @@ LayerController.Promise = Promise;
 
 LayerController.superagent = superagent;
 
-LayerController.EventEmitter2 = EventEmitter2;
-
 LayerController.pasteHTML = pasteHTML;
 
 LayerController.Log = Log;
 
 module.exports = LayerController;
+
+LayerController.Module = Module;
+
+LayerController.extend(new LayerController.Module.EventEmitter2({
+  wildcard: true
+}));

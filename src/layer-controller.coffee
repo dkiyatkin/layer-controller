@@ -1,11 +1,11 @@
 _ = require('lodash')
 Promise = require('bluebird')
 superagent = require('superagent')
-EventEmitter2 = require('eventemitter2').EventEmitter2
+Module = require('./module')
 pasteHTML = require('./pasteHTML')
 Log = require('./log')
 
-class LayerController extends EventEmitter2
+class LayerController extends Module
   # Выполнить все события
   # @param {String} event
   # @param {*} args
@@ -74,7 +74,7 @@ class LayerController extends EventEmitter2
   # @param {?String} key Ключ по которому будут сохранены данные
   # @return {?Promise} data
   _load: (path, key, data) ->
-    @log.debug('_load', path, key, data)
+    # @log.debug('_load', path, key, data)
     @data = {} if not @data
     @_data = {} if not @_data
     if not path
@@ -525,6 +525,7 @@ class LayerController extends EventEmitter2
       @layers = @main.layers
       @layers.push(this)
       @name = "#{@layers.length}/#{@parentLayer.childLayers.length}" if not @name
+      _name = @name
       @name = @parentLayer.name + '.' + @name
     else # main слой без parentLayer
       @main = this
@@ -537,17 +538,20 @@ class LayerController extends EventEmitter2
       @main.request.loading = {} # загружаемые адреса и их Promise
       @main.request.cache = {}
       @main.layers = [this]
-      @main.name = 'main' if not @main.name
+      @main.name = parentLayer?.name or @main.name or 'main'
+      _name = @main.name
     @log = new Log(this)
     @log.debug('new')
     @busy = {}
     @config = {}
     @rel = {}
+    LayerController.emit("init.#{_name}", this)
 
 LayerController._ = _
 LayerController.Promise = Promise
 LayerController.superagent = superagent
-LayerController.EventEmitter2 = EventEmitter2
 LayerController.pasteHTML = pasteHTML
 LayerController.Log = Log
 module.exports = LayerController
+LayerController.Module = Module
+LayerController.extend(new LayerController.Module.EventEmitter2({wildcard: true})) # делаем сам класс эмиттером
