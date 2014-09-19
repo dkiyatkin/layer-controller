@@ -11,21 +11,21 @@ describe 'state', ->
 
     layer.state('/1').then (_layer) ->
       assert.equal 1, ++a
-      assert.strictEqual(_layer.busy.state.current, '/1', 'first state')
+      assert.strictEqual(_layer.task.state.current, '/1', 'first state')
 
     layer.state('/2').then (_layer) ->
       assert.equal 2, ++a
       assert.strictEqual(_layer, null)
-      assert.strictEqual(layer.busy.state.current, '/1')
+      assert.strictEqual(layer.task.state.current, '/1')
 
     layer.state('/3').then (_layer) ->
       assert.equal 3, ++a
       assert.strictEqual(_layer, null)
-      assert.strictEqual(layer.busy.state.current, '/1')
+      assert.strictEqual(layer.task.state.current, '/1')
 
     layer.state('/4').then (_layer) ->
       assert.equal 4, ++a
-      assert.strictEqual(_layer.busy.state.current, '/4', 'last state')
+      assert.strictEqual(_layer.task.state.current, '/4', 'last state')
       testDone()
 
   it 'one layer state with dom', (testDone) ->

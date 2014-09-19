@@ -14,7 +14,7 @@ class Log
   # @return {String} log
   _log: (msg, level) ->
     msg = msg.join(' ')
-    log = "[#{new Date().toISOString()}] #{@levels[level]} layer #{@layer.name}: #{msg}"
+    log = "[#{new Date().toISOString()}] #{@levels[level]} layer #{@layer.getFullName()}: #{msg}"
     colorLog = log[@levels[level]] if not window?
     if @levels.indexOf(@level) <= level
       (console[@levels[level].toLowerCase()] or console.log).call(console, colorLog or log) # console.debug nodejs нету

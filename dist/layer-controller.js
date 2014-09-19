@@ -52,14 +52,39 @@ LayerController = (function(_super) {
     })(this));
   };
 
+  LayerController.prototype._task = function(name, type) {
+    var task;
+    if (!this.task[name]) {
+      this.task[name] = {};
+    }
+    task = this.task[name];
+    if (task.run) {
+      if (task.type === type) {
+        return task;
+      }
+      task.run.then((function(_this) {
+        return function() {
+          return _this[name](type);
+        };
+      })(this));
+    }
+    task.type = type;
+    return task;
+  };
+
+  LayerController.prototype._deleteTask = function(task, fn, arg) {
+    delete task.type;
+    delete task.run;
+    return fn(arg);
+  };
+
   LayerController.prototype.test = function(testValue) {
-    if (!this.busy.test) {
-      this.busy.test = {};
+    var task;
+    task = this._task('load', testValue);
+    if (task.run) {
+      return task.run;
     }
-    if (this.busy.test[testValue]) {
-      return this.busy.test[testValue];
-    }
-    return this.busy.test[testValue] = new Promise((function(_this) {
+    return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
         emits = [];
@@ -71,11 +96,9 @@ LayerController = (function(_super) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
-            if (!(!success)) {
-              continue;
+            if (!success) {
+              return _this._deleteTask(task, resolve, null);
             }
-            delete _this.busy.test[testValue];
-            return resolve(null);
           }
           if (_this.testCount == null) {
             _this.testCount = 0;
@@ -89,18 +112,17 @@ LayerController = (function(_super) {
           }
           return Promise.all(emits).then(function(emits) {
             var _j, _len1;
-            delete _this.busy.test[testValue];
             for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
               success = emits[_j];
               if (!success) {
-                return resolve(null);
+                return _this._deleteTask(task, resolve, null);
               }
             }
-            return resolve(_this);
+            return _this._deleteTask(task, resolve, _this);
           });
-        }).then(null, function(err) {
-          delete _this.busy.test[testValue];
-          return reject(err);
+        })["catch"](function(err) {
+          _this.log.error(err);
+          return _this._deleteTask(task, reject, err);
         });
       };
     })(this));
@@ -194,8 +216,10 @@ LayerController = (function(_super) {
   };
 
   LayerController.prototype.load = function() {
-    if (this.busy.load) {
-      return this.busy.load;
+    var task;
+    task = this._task('load');
+    if (task.run) {
+      return task.run;
     }
     if (this.data != null) {
       return Promise.resolve(this);
@@ -203,7 +227,7 @@ LayerController = (function(_super) {
     if (!this.download) {
       return Promise.reject(new Error(this.log.error('layer.download does not exist')));
     }
-    return this.busy.load = new Promise((function(_this) {
+    return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
         emits = [];
@@ -212,30 +236,27 @@ LayerController = (function(_super) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
-            if (!(!success)) {
-              continue;
+            if (!success) {
+              return _this._deleteTask(task, resolve, null);
             }
-            delete _this.busy.load;
-            return resolve(null);
           }
           return _this._load().then(function() {
             emits = [];
             emits.push(_this.emitAll('loaded'));
             return Promise.all(emits).then(function(emits) {
               var _j, _len1;
-              delete _this.busy.load;
               for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
                 success = emits[_j];
                 if (!success) {
-                  return resolve(null);
+                  return _this._deleteTask(task, resolve, null);
                 }
               }
-              return resolve(_this);
+              return _this._deleteTask(task, resolve, _this);
             });
           });
-        }).then(null, function(err) {
-          delete _this.busy.load;
-          return reject(err);
+        })["catch"](function(err) {
+          _this.log.error(err);
+          return _this._deleteTask(task, reject, err);
         });
       };
     })(this));
@@ -256,7 +277,7 @@ LayerController = (function(_super) {
     }
     return Promise.all(_all).then((function(_this) {
       return function(layers) {
-        return _this.make().then(function(layer) {
+        return _this.make(true).then(function(layer) {
           if (!layer) {
             return null;
           }
@@ -266,18 +287,22 @@ LayerController = (function(_super) {
     })(this));
   };
 
-  LayerController.prototype.parse = function() {
-    var _ref;
-    if (this.busy.parse) {
-      return this.busy.parse;
+  LayerController.prototype.parse = function(force) {
+    var task, _ref;
+    if (force == null) {
+      force = false;
     }
-    if (this.html != null) {
+    task = this._task('parse', force);
+    if (task.run) {
+      return task.run;
+    }
+    if ((this.html != null) && !force) {
       return Promise.resolve(this);
     }
     if (((_ref = this.data) != null ? _ref.tpl : void 0) == null) {
       return Promise.reject(new Error(this.log.error('layer.data.tpl does not exist')));
     }
-    return this.busy.parse = new Promise((function(_this) {
+    return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
         emits = [];
@@ -286,37 +311,34 @@ LayerController = (function(_super) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
-            if (!(!success)) {
-              continue;
+            if (!success) {
+              return _this._deleteTask(task, resolve, null);
             }
-            delete _this.busy.parse;
-            return resolve(null);
           }
           _this.html = _this.render(_this.data.tpl);
           emits = [];
           emits.push(_this.emitAll('parsed'));
           return Promise.all(emits).then(function(emits) {
             var _j, _len1;
-            delete _this.busy.parse;
             for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
               success = emits[_j];
               if (!(!success)) {
                 continue;
               }
               _this.html = null;
-              return resolve(null);
+              return _this._deleteTask(task, resolve, null);
             }
-            return resolve(_this);
+            return _this._deleteTask(task, resolve, _this);
           });
-        }).then(null, function(err) {
-          delete _this.busy.parse;
-          return reject(err);
+        })["catch"](function(err) {
+          _this.log.error(err);
+          return _this._deleteTask(task, reject, err);
         });
       };
     })(this));
   };
 
-  LayerController.prototype._make = function() {
+  LayerController.prototype._make = function(force) {
     var _ref;
     if (this.download) {
       return this.load().then((function(_this) {
@@ -324,22 +346,27 @@ LayerController = (function(_super) {
           if (!layer) {
             return null;
           }
-          return _this.parse();
+          return _this.parse(force);
         };
       })(this));
     } else {
       if (((_ref = this.data) != null ? _ref.tpl : void 0) == null) {
         return Promise.resolve(this);
       }
-      return this.parse();
+      return this.parse(force);
     }
   };
 
-  LayerController.prototype.make = function() {
-    if (this.busy.make) {
-      return this.busy.make;
+  LayerController.prototype.make = function(force) {
+    var task;
+    if (force == null) {
+      force = false;
     }
-    return this.busy.make = new Promise((function(_this) {
+    task = this._task('make', force);
+    if (task.run) {
+      return task.run;
+    }
+    return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
         emits = [];
@@ -348,34 +375,30 @@ LayerController = (function(_super) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
-            if (!(!success)) {
-              continue;
+            if (!success) {
+              return _this._deleteTask(task, resolve, null);
             }
-            delete _this.busy.make;
-            return resolve(null);
           }
-          return _this._make().then(function(layer) {
+          return _this._make(force).then(function(layer) {
             if (!layer) {
-              delete _this.busy.make;
-              return resolve(null);
+              return _this._deleteTask(task, resolve, null);
             }
             emits = [];
             emits.push(_this.emitAll('made'));
             return Promise.all(emits).then(function(emits) {
               var _j, _len1;
-              delete _this.busy.make;
               for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
                 success = emits[_j];
                 if (!success) {
-                  return resolve(null);
+                  return _this._deleteTask(task, resolve, null);
                 }
               }
-              return resolve(_this);
+              return _this._deleteTask(task, resolve, _this);
             });
           });
-        }).then(null, function(err) {
-          delete _this.busy.make;
-          return reject(err);
+        })["catch"](function(err) {
+          _this.log.error(err);
+          return _this._deleteTask(task, reject, err);
         });
       };
     })(this));
@@ -429,16 +452,18 @@ LayerController = (function(_super) {
   };
 
   LayerController.prototype.insert = function(force) {
+    var task;
     if (force == null) {
       force = true;
     }
-    if (this.busy.insert) {
-      return this.busy.insert;
+    task = this._task('insert', force);
+    if (task.run) {
+      return task.run;
     }
     if (!this.selectors) {
       return Promise.reject(new Error(this.log.error('layer.selectors does not exist')));
     }
-    return this.busy.insert = new Promise((function(_this) {
+    return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
         emits = [];
@@ -447,90 +472,68 @@ LayerController = (function(_super) {
           var elementList, success, _i, _len, _ref;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
-            if (!(!success)) {
-              continue;
+            if (!success) {
+              return _this._deleteTask(task, resolve, null);
             }
-            delete _this.busy.insert;
-            return resolve(null);
           }
           if (!(!force && ((_ref = _this.elementList) != null ? _ref.length : void 0))) {
             _this.elementList = null;
             elementList = _this.findElements();
             if (!(elementList != null ? elementList.length : void 0)) {
-              delete _this.busy.insert;
-              return resolve(null);
+              return _this._deleteTask(task, resolve, null);
             }
             _this.htmlElements(elementList, _this.html);
             _this.elementList = elementList;
           }
           emits = [];
-          emits.push(_this.emitAll('inserted'));
           emits.push(_this.emitAll('domready'));
-          if (typeof window !== "undefined" && window !== null) {
-            emits.push(_this.emitAll('inserted.window'));
-          }
           if (typeof window !== "undefined" && window !== null) {
             emits.push(_this.emitAll('domready.window'));
           }
           return Promise.all(emits).then(function(emits) {
             var _j, _len1;
-            delete _this.busy.insert;
             for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
               success = emits[_j];
               if (!(!success)) {
                 continue;
               }
               _this.elementList = null;
-              return resolve(null);
+              return _this._deleteTask(task, resolve, null);
             }
-            return resolve(_this);
+            return _this._deleteTask(task, resolve, _this);
           });
-        }).then(null, function(err) {
-          delete _this.busy.insert;
-          return reject(err);
+        })["catch"](function(err) {
+          _this.log.error(err);
+          return _this._deleteTask(task, reject, err);
         });
       };
     })(this));
   };
 
-  LayerController.prototype._show = function(childLayers) {
-    return this.make().then((function(_this) {
+  LayerController.prototype._show = function(force) {
+    return this.make(force).then((function(_this) {
       return function(layer) {
-        var _ref, _ref1;
         if (!layer) {
           return null;
         }
-        if (!childLayers) {
-          return _this.insert(!((_ref = _this.elementList) != null ? _ref.length : void 0));
-        }
-        return _this.insert(!((_ref1 = _this.elementList) != null ? _ref1.length : void 0)).then(function(layer) {
-          var _all, _i, _layer, _len, _ref1;
-          if (!layer) {
-            return null;
-          }
-          _all = [];
-          _ref1 = _this.childLayers;
-          for (_i = 0, _len = _ref1.length; _i < _len; _i++) {
-            _layer = _ref1[_i];
-            _all.push(_layer.show(childLayers));
-          }
-          return Promise.all(_all).then(function(layers) {
-            return _this;
-          });
-        });
+        return _this.insert(force);
       };
     })(this));
   };
 
-  LayerController.prototype.show = function(childLayers) {
-    var _ref;
-    if (this.busy.show) {
-      return this.busy.show;
+  LayerController.prototype.show = function(force) {
+    var task, _ref;
+    if (force == null) {
+      force = false;
+    }
+    task = this._task('show', force);
+    if (task.run) {
+      return task.run;
     }
     if (this.isShown && ((_ref = this.elementList) != null ? _ref.length : void 0)) {
       return Promise.resolve(this);
     }
-    return this.busy.show = new Promise((function(_this) {
+    return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
         emits = [];
@@ -539,225 +542,267 @@ LayerController = (function(_super) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
-            if (!(!success)) {
-              continue;
+            if (!success) {
+              return _this._deleteTask(task, resolve, null);
             }
-            delete _this.busy.show;
-            return resolve(null);
           }
-          return _this._show(childLayers).then(function(layer) {
+          return _this._show(force).then(function(layer) {
             if (!layer) {
-              delete _this.busy.show;
-              return resolve(null);
+              return _this._deleteTask(task, resolve, null);
             }
             emits = [];
-            emits.push(_this.emitAll('showed'));
             emits.push(_this.emitAll('shown'));
             return Promise.all(emits).then(function(emits) {
               var _j, _len1;
-              delete _this.busy.show;
               for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
                 success = emits[_j];
                 if (!success) {
-                  return resolve(null);
+                  return _this._deleteTask(task, resolve, null);
                 }
               }
               _this.isShown = true;
-              return resolve(_this);
+              return _this._deleteTask(task, resolve, _this);
             });
           });
-        }).then(null, function(err) {
-          delete _this.busy.show;
-          return reject(err);
+        })["catch"](function(err) {
+          _this.log.error(err);
+          return _this._deleteTask(task, reject, err);
         });
       };
     })(this));
   };
 
-  LayerController.prototype._hide = function(childLayers) {
-    var _all, _i, _layer, _len, _ref;
-    if (childLayers == null) {
-      childLayers = true;
+  LayerController.prototype.hideAll = function(force) {
+    var task;
+    if (force == null) {
+      force = false;
     }
-    if (!childLayers) {
-      this.htmlElements(this.elementList, '');
-      return Promise.resolve(this);
+    task = this._task('hideAll', force);
+    if (task.run) {
+      return task.run;
     }
-    _all = [];
-    _ref = this.childLayers;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      _layer = _ref[_i];
-      _all.push(_layer.hide(childLayers));
-    }
-    return Promise.all(_all).then((function(_this) {
-      return function(layers) {
-        _this.htmlElements(_this.elementList, '');
-        return _this;
+    return task.run = new Promise((function(_this) {
+      return function(resolve, reject) {
+        var emits;
+        emits = [];
+        emits.push(_this.emitAll('hide.all', state));
+        return Promise.all(emits).then(function(emits) {
+          var success, _i, _len;
+          for (_i = 0, _len = emits.length; _i < _len; _i++) {
+            success = emits[_i];
+            if (!success) {
+              return _this._deleteTask(task, resolve, null);
+            }
+          }
+          return Promise.all(_this.childLayers.map(function(layer) {
+            return layer.hideAll(force);
+          }))["catch"](_this.log.error)["finally"](function() {
+            return _this.hide(force).then(function() {
+              emits = [];
+              emits.push(_this.emitAll('hidden.all', state));
+              return Promise.all(emits).then(function(emits) {
+                var _j, _len1;
+                for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
+                  success = emits[_j];
+                  if (!success) {
+                    return _this._deleteTask(task, resolve, null);
+                  }
+                }
+                return _this._deleteTask(task, resolve, _this);
+              });
+            });
+          });
+        })["catch"](function(err) {
+          _this.log.error(err);
+          return _this._deleteTask(task, reject, err);
+        });
       };
     })(this));
   };
 
-  LayerController.prototype.hide = function(childLayers) {
-    if (childLayers == null) {
-      childLayers = true;
+  LayerController.prototype.hide = function(force) {
+    var task, _ref;
+    if (force == null) {
+      force = false;
     }
-    if (this.busy.hide) {
-      return this.busy.hide;
+    task = this._task('hide', force);
+    if (task.run) {
+      return task.run;
     }
-    if (!this.isShown && !this.elementList) {
+    if (!this.isShown && !((_ref = this.elementList) != null ? _ref.length : void 0) && !force) {
       Promise.resolve(this);
     }
-    return this.busy.hide = new Promise((function(_this) {
+    return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
         emits = [];
         emits.push(_this.emitAll('hide'));
         return Promise.all(emits).then(function(emits) {
-          var success, _i, _len;
+          var success, _i, _len, _ref1;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
-            if (!(!success)) {
-              continue;
+            if (!success) {
+              return _this._deleteTask(task, resolve, null);
             }
-            delete _this.busy.hide;
-            return resolve(null);
           }
-          return _this._hide(childLayers).then(function(layer) {
-            if (!layer) {
-              delete _this.busy.hide;
-              return resolve(null);
-            }
-            _this.isShown = false;
-            _this.elementList = null;
-            emits = [];
-            emits.push(_this.emitAll('hidden'));
-            return Promise.all(emits).then(function(emits) {
-              var _j, _len1;
-              delete _this.busy.hide;
-              for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
-                success = emits[_j];
-                if (!success) {
-                  return resolve(null);
-                }
+          if (force && !((_ref1 = _this.elementList) != null ? _ref1.length : void 0)) {
+            _this.htmlElements(_this.findElements(), '');
+          } else {
+            _this.htmlElements(_this.elementList, '');
+          }
+          _this.isShown = false;
+          _this.elementList = null;
+          emits = [];
+          emits.push(_this.emitAll('hidden'));
+          return Promise.all(emits).then(function(emits) {
+            var _j, _len1;
+            for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
+              success = emits[_j];
+              if (!success) {
+                return _this._deleteTask(task, resolve, null);
               }
-              return resolve(_this);
-            });
+            }
+            return _this._deleteTask(task, resolve, _this);
           });
-        }).then(null, function(err) {
-          delete _this.busy.hide;
-          return reject(err);
+        })["catch"](function(err) {
+          _this.log.error(err);
+          return _this._deleteTask(task, reject, err);
         });
       };
     })(this));
   };
 
-  LayerController.prototype._state = function(state, childLayers) {
-    this.log.debug('_state', state, childLayers);
-    if (!this.selectors) {
-      return Promise.resolve(this);
-    }
-    if (!this.regState || (state.search(this.regState) !== -1)) {
-      if (!childLayers) {
-        return this.show();
-      }
-      return this.show().then((function(_this) {
-        return function(layer) {
-          var _all, _i, _layer, _len, _ref;
-          if (!layer) {
-            return null;
-          }
-          _all = [];
-          _ref = _this.childLayers;
-          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-            _layer = _ref[_i];
-            _all.push(_layer.state(state, childLayers));
-          }
-          return Promise.all(_all).then(function(layers) {
-            return _this;
-          });
-        };
-      })(this));
-    } else {
-      return this.hide(childLayers);
-    }
-  };
-
-  LayerController.prototype.state = function(state, childLayers) {
-    var pushed;
+  LayerController.prototype.stateAll = function(state) {
+    var task;
     if (state == null) {
       state = '';
     }
-    this.log.debug('state', state, childLayers);
-    if (!this.busy.state) {
-      this.busy.state = {
+    task = this._task('stateAll', state);
+    if (task.run) {
+      return task.run;
+    }
+    return task.run = new Promise((function(_this) {
+      return function(resolve, reject) {
+        var emits;
+        emits = [];
+        emits.push(_this.emitAll('state.all', state));
+        return Promise.all(emits).then(function(emits) {
+          var success, _i, _len;
+          for (_i = 0, _len = emits.length; _i < _len; _i++) {
+            success = emits[_i];
+            if (!success) {
+              return _this._deleteTask(task, resolve, null);
+            }
+          }
+          return _this.state(state).then(function() {
+            return Promise.all(_this.childLayers.map(function(layer) {
+              return layer.stateAll(state);
+            }))["catch"](_this.log.error)["finally"](function() {
+              emits = [];
+              emits.push(_this.emitAll('stated.all', state));
+              return Promise.all(emits).then(function(emits) {
+                var _j, _len1;
+                for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
+                  success = emits[_j];
+                  if (!success) {
+                    return _this._deleteTask(task, resolve, null);
+                  }
+                }
+                return _this._deleteTask(task, resolve, _this);
+              });
+            });
+          });
+        })["catch"](function(err) {
+          _this.log.error(err);
+          return _this._deleteTask(task, reject, err);
+        });
+      };
+    })(this));
+  };
+
+  LayerController.prototype._state = function(state) {
+    if (!this.selectors) {
+      return Promise.resolve(this);
+    }
+    if (!(!this.regState || (state.search(this.regState) !== -1))) {
+      return this.hideAll();
+    }
+    return this.show();
+  };
+
+  LayerController.prototype.state = function(state) {
+    var pushed, task;
+    if (state == null) {
+      state = '';
+    }
+    this.log.debug('state', state);
+    if (!this.task.state) {
+      this.task.state = {
         queue: []
       };
     }
-    if (this.busy.state.run) {
-      pushed = this.busy.state.queue.push(state);
-      return this.busy.state.run.then((function(_this) {
+    task = this.task.state;
+    if (task.run) {
+      pushed = task.queue.push(state);
+      return task.run.then((function(_this) {
         return function() {
-          if (_this.busy.state.queue.length !== pushed) {
+          if (task.queue.length !== pushed) {
             return null;
           }
-          _this.busy.queue = [];
-          return _this.busy.state.run = _this.state(state);
+          task.queue = [];
+          return task.run = _this.state(state);
         };
       })(this));
     }
-    return this.busy.state.run = new Promise((function(_this) {
+    return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
         _this.log.debug('state run');
-        _this.busy.state.next = state;
-        _this.busy.state.equal = (_this.busy.state.current === _this.busy.state.next ? true : false);
-        _this.busy.state.progress = ((_this.busy.state.current != null) && !_this.busy.state.equal ? true : false);
+        _this.task.state.next = state;
+        _this.task.state.equal = (_this.task.state.current === _this.task.state.next ? true : false);
+        _this.task.state.progress = ((_this.task.state.current != null) && !_this.task.state.equal ? true : false);
         emits = [];
-        emits.push(_this.emitAll('state'));
-        if (_this.busy.state.current != null) {
-          emits.push(_this.emitAll('state.next'));
+        emits.push(_this.emitAll('state', state));
+        if (_this.task.state.current != null) {
+          emits.push(_this.emitAll('state.next', state));
         }
-        if (!_this.busy.state.equal) {
-          emits.push(_this.emitAll('state.different'));
+        if (!_this.task.state.equal) {
+          emits.push(_this.emitAll('state.different', state));
         }
-        if (_this.busy.state.progress) {
-          emits.push(_this.emitAll('state.progress'));
+        if (_this.task.state.progress) {
+          emits.push(_this.emitAll('state.progress', state));
         }
         return Promise.all(emits).then(function(emits) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
-            if (!(!success)) {
-              continue;
+            if (!success) {
+              return _this._deleteTask(task, resolve, null);
             }
-            delete _this.busy.state.run;
-            return resolve(null);
           }
-          return _this._state(state, childLayers).then(function(layer) {
+          return _this._state(state).then(function(layer) {
             if (!layer) {
-              delete _this.busy.state.run;
-              return resolve(null);
+              return _this._deleteTask(task, resolve, null);
             }
-            _this.busy.state.last = _this.busy.state.current;
-            _this.busy.state.current = state;
-            delete _this.busy.state.next;
+            _this.task.state.last = _this.task.state.current;
+            _this.task.state.current = state;
+            delete _this.task.state.next;
             emits = [];
-            emits.push(_this.emitAll('stated'));
+            emits.push(_this.emitAll('stated', state));
             return Promise.all(emits).then(function(emits) {
               var _j, _len1;
-              delete _this.busy.state.run;
               for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
                 success = emits[_j];
                 if (!success) {
-                  return resolve(null);
+                  return _this._deleteTask(task, resolve, null);
                 }
               }
-              return resolve(_this);
+              return _this._deleteTask(task, resolve, _this);
             });
           });
-        }).then(null, function(err) {
-          delete _this.busy.state.run;
-          return reject(err);
+        })["catch"](function(err) {
+          _this.log.error(err);
+          return _this._deleteTask(task, reject, err);
         });
       };
     })(this));
@@ -796,8 +841,14 @@ LayerController = (function(_super) {
     return false;
   };
 
+  LayerController.prototype.getFullName = function() {
+    if (!this.parentLayer) {
+      return this.name;
+    }
+    return this.parentLayer.getFullName() + '.' + this.name;
+  };
+
   function LayerController(parentLayer) {
-    var _name;
     LayerController.__super__.constructor.call(this, {
       wildcard: true
     });
@@ -812,8 +863,6 @@ LayerController = (function(_super) {
       if (!this.name) {
         this.name = "" + this.layers.length + "/" + this.parentLayer.childLayers.length;
       }
-      _name = this.name;
-      this.name = this.parentLayer.name + '.' + this.name;
     } else {
       this.main = this;
       if (typeof document !== "undefined" && document !== null) {
@@ -828,14 +877,13 @@ LayerController = (function(_super) {
       this.main.request.cache = {};
       this.main.layers = [this];
       this.main.name = (parentLayer != null ? parentLayer.name : void 0) || this.main.name || 'main';
-      _name = this.main.name;
     }
     this.log = new Log(this);
     this.log.debug('new');
-    this.busy = {};
+    this.task = {};
     this.config = {};
     this.rel = {};
-    LayerController.emit("init." + _name, this);
+    LayerController.emit("init." + (this.getFullName()), this);
   }
 
   return LayerController;
@@ -856,6 +904,8 @@ module.exports = LayerController;
 
 LayerController.Module = Module;
 
-LayerController.extend(new LayerController.Module.EventEmitter2({
+LayerController.EventEmitter2 = Module.EventEmitter2;
+
+LayerController.extend(new Module.EventEmitter2({
   wildcard: true
 }));
