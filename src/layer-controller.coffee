@@ -28,9 +28,34 @@ class LayerController extends Module
 
     @emit.apply(this, args)
 
+  # Список конфликтующих заданий
+  _conflictTask:
+    'stateAll': ['state', 'hideAll', 'hide', 'show', 'insert']
+    'state': ['hideAll', 'hide', 'show', 'insert']
+    'hideAll': ['hide', 'show', 'insert']
+    'hide': ['show', 'insert']
+    'show': ['hideAll', 'hide', 'insert']
+    'insert': ['hideAll', 'hide']
+
+  # Разрешение несовместимых заданий
+  # @param {String} name Имя функции, задание
+  # @param {*} type Аргумент для функции, тип задания
+  # @return {Object} task
+  _afterConflictTask: (name, type) ->
+    task = @task[name]
+    return task if task.run # если есть выполнение то ничего не делать
+    return task if not @_conflictTask[name]?.length
+    conflictTasks = (_task.run for own _name, _task of @task when (@_conflictTask[name].indexOf(_name) isnt -1) and _task.run)
+    return task if not conflictTasks.length
+
+    task.run = Promise.all(conflictTasks).finally =>
+      @_deleteTask(task)
+      @[name](type)
+
   # Определить задание, только разные задания могут выполнятся одновременно
   # Одни задания разного типа выполняются друг за другом
   # Задания одного типа второй раз не выполняются, а возвращают результат предыдущего задания, когда оно завершится
+  # Если есть конфликтующие задания, то новое задание запустится после их выполнения
   # @param {String} name Имя функции, задание
   # @param {*} type Аргумент для функции, тип задания
   # @return {Object} task Если есть task[name].run, то задание с этим именем выполняется, тип задания task[name].type
@@ -41,17 +66,17 @@ class LayerController extends Module
       return task if task.type is type
       task.run.then => @[name](type)
     task.type = type
-    task
+    @_afterConflictTask(name, type)
 
   # Завершить задание
   # @param {Object} task
-  # @param {Function} fn resolve/reject
+  # @param {?Function} fn resolve/reject
   # @param {*} arg
-  # @return {Resolve|Reject} fn(arg)
+  # @return {?Promise} fn(arg)
   _deleteTask: (task, fn, arg) ->
     delete task.type
     delete task.run
-    fn(arg)
+    fn(arg) if fn?
 
   # Тестовый метод слоя, ничего не делает
   # События
@@ -185,9 +210,11 @@ class LayerController extends Module
     Promise.all(@childLayers.map (layer) -> layer.reparse()).catch(@log.error).finally => # перепарсить дочерние слои сначала
       @reparse()
 
-  # Перерисовать слой
+  # Перерисовать вставленный слой
   # @return {Promise} layer
-  reparse: -> @_show(true)
+  reparse: ->
+    return Promise.resolve(null) if not @elementList?.length # layer.isShown не важно
+    @_show(true)
 
   # Распарсить шаблон (layer.data.tpl) слоя в html (layer.html)
   # @param {Boolean} force Парсить даже если есть layer.html
@@ -458,9 +485,9 @@ class LayerController extends Module
   # @param {String} state Состояние для слоя
   # @return {Promise} layer
   state: (state = '') ->
-    @log.debug('state', state)
+    # @log.debug('state', state)
     @task.state = {queue: []} if not @task.state
-    task = @task.state
+    task = @_afterConflictTask('state', state)
     if task.run # если уже идет state
       pushed = task.queue.push(state)
 

@@ -52,6 +52,48 @@ LayerController = (function(_super) {
     })(this));
   };
 
+  LayerController.prototype._conflictTask = {
+    'stateAll': ['state', 'hideAll', 'hide', 'show', 'insert'],
+    'state': ['hideAll', 'hide', 'show', 'insert'],
+    'hideAll': ['hide', 'show', 'insert'],
+    'hide': ['show', 'insert'],
+    'show': ['hideAll', 'hide', 'insert'],
+    'insert': ['hideAll', 'hide']
+  };
+
+  LayerController.prototype._afterConflictTask = function(name, type) {
+    var conflictTasks, task, _name, _ref, _task;
+    task = this.task[name];
+    if (task.run) {
+      return task;
+    }
+    if (!((_ref = this._conflictTask[name]) != null ? _ref.length : void 0)) {
+      return task;
+    }
+    conflictTasks = (function() {
+      var _ref1, _results;
+      _ref1 = this.task;
+      _results = [];
+      for (_name in _ref1) {
+        if (!__hasProp.call(_ref1, _name)) continue;
+        _task = _ref1[_name];
+        if ((this._conflictTask[name].indexOf(_name) !== -1) && _task.run) {
+          _results.push(_task.run);
+        }
+      }
+      return _results;
+    }).call(this);
+    if (!conflictTasks.length) {
+      return task;
+    }
+    return task.run = Promise.all(conflictTasks)["finally"]((function(_this) {
+      return function() {
+        _this._deleteTask(task);
+        return _this[name](type);
+      };
+    })(this));
+  };
+
   LayerController.prototype._task = function(name, type) {
     var task;
     if (!this.task[name]) {
@@ -69,13 +111,15 @@ LayerController = (function(_super) {
       })(this));
     }
     task.type = type;
-    return task;
+    return this._afterConflictTask(name, type);
   };
 
   LayerController.prototype._deleteTask = function(task, fn, arg) {
     delete task.type;
     delete task.run;
-    return fn(arg);
+    if (fn != null) {
+      return fn(arg);
+    }
   };
 
   LayerController.prototype.test = function(testValue) {
@@ -262,29 +306,22 @@ LayerController = (function(_super) {
     })(this));
   };
 
-  LayerController.prototype.reparse = function(childLayers) {
-    var _all, _i, _layer, _len, _ref;
-    if (childLayers == null) {
-      childLayers = true;
-    }
-    _all = [];
-    if (childLayers) {
-      _ref = this.childLayers;
-      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-        _layer = _ref[_i];
-        _all.push(_layer.reparse(childLayers));
-      }
-    }
-    return Promise.all(_all).then((function(_this) {
-      return function(layers) {
-        return _this.make(true).then(function(layer) {
-          if (!layer) {
-            return null;
-          }
-          return _this.insert();
-        });
+  LayerController.prototype.reparseAll = function() {
+    return Promise.all(this.childLayers.map(function(layer) {
+      return layer.reparse();
+    }))["catch"](this.log.error)["finally"]((function(_this) {
+      return function() {
+        return _this.reparse();
       };
     })(this));
+  };
+
+  LayerController.prototype.reparse = function() {
+    var _ref;
+    if (!((_ref = this.elementList) != null ? _ref.length : void 0)) {
+      return Promise.resolve(null);
+    }
+    return this._show(true);
   };
 
   LayerController.prototype.parse = function(force) {
@@ -735,13 +772,12 @@ LayerController = (function(_super) {
     if (state == null) {
       state = '';
     }
-    this.log.debug('state', state);
     if (!this.task.state) {
       this.task.state = {
         queue: []
       };
     }
-    task = this.task.state;
+    task = this._afterConflictTask('state', state);
     if (task.run) {
       pushed = task.queue.push(state);
       return task.run.then((function(_this) {
