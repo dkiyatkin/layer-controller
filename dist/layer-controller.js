@@ -86,7 +86,7 @@ LayerController = (function(_super) {
     if (!conflictTasks.length) {
       return task;
     }
-    return task.run = Promise.all(conflictTasks)["finally"]((function(_this) {
+    return task.run = Promise.all(conflictTasks)["catch"]().then((function(_this) {
       return function() {
         _this._deleteTask(task);
         return _this[name](type);
@@ -117,6 +117,7 @@ LayerController = (function(_super) {
   LayerController.prototype._deleteTask = function(task, fn, arg) {
     delete task.type;
     delete task.run;
+    delete task.err;
     if (fn != null) {
       return fn(arg);
     }
@@ -136,12 +137,12 @@ LayerController = (function(_super) {
         if (testValue === 24) {
           emits.push(_this.emitAll('test.prop', testValue, 42));
         }
-        return Promise.all(emits).then(function(emits) {
+        return resolve(Promise.all(emits).then(function(emits) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
             if (!success) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
           }
           if (_this.testCount == null) {
@@ -159,15 +160,20 @@ LayerController = (function(_super) {
             for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
               success = emits[_j];
               if (!success) {
-                return _this._deleteTask(task, resolve, null);
+                return _this._deleteTask(task, Promise.resolve, null);
               }
             }
-            return _this._deleteTask(task, resolve, _this);
+            return _this._deleteTask(task, Promise.resolve, _this);
           });
-        })["catch"](function(err) {
+        }));
+      };
+    })(this))["catch"]((function(_this) {
+      return function(err) {
+        if (task.err == null) {
           _this.log.error(err);
-          return _this._deleteTask(task, reject, err);
-        });
+        }
+        _this._deleteTask(task);
+        throw err;
       };
     })(this));
   };
@@ -276,12 +282,12 @@ LayerController = (function(_super) {
         var emits;
         emits = [];
         emits.push(_this.emitAll('load'));
-        return Promise.all(emits).then(function(emits) {
+        return resolve(Promise.all(emits).then(function(emits) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
             if (!success) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
           }
           return _this._load().then(function() {
@@ -292,16 +298,21 @@ LayerController = (function(_super) {
               for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
                 success = emits[_j];
                 if (!success) {
-                  return _this._deleteTask(task, resolve, null);
+                  return _this._deleteTask(task, Promise.resolve, null);
                 }
               }
-              return _this._deleteTask(task, resolve, _this);
+              return _this._deleteTask(task, Promise.resolve, _this);
             });
           });
-        })["catch"](function(err) {
+        }));
+      };
+    })(this))["catch"]((function(_this) {
+      return function(err) {
+        if (task.err == null) {
           _this.log.error(err);
-          return _this._deleteTask(task, reject, err);
-        });
+        }
+        _this._deleteTask(task);
+        throw err;
       };
     })(this));
   };
@@ -309,7 +320,7 @@ LayerController = (function(_super) {
   LayerController.prototype.reparseAll = function() {
     return Promise.all(this.childLayers.map(function(layer) {
       return layer.reparse();
-    }))["catch"](this.log.error)["finally"]((function(_this) {
+    }))["catch"]().then((function(_this) {
       return function() {
         return _this.reparse();
       };
@@ -344,12 +355,12 @@ LayerController = (function(_super) {
         var emits;
         emits = [];
         emits.push(_this.emitAll('parse'));
-        return Promise.all(emits).then(function(emits) {
+        return resolve(Promise.all(emits).then(function(emits) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
             if (!success) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
           }
           _this.html = _this.render(_this.data.tpl);
@@ -363,14 +374,19 @@ LayerController = (function(_super) {
                 continue;
               }
               _this.html = null;
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
-            return _this._deleteTask(task, resolve, _this);
+            return _this._deleteTask(task, Promise.resolve, _this);
           });
-        })["catch"](function(err) {
+        }));
+      };
+    })(this))["catch"]((function(_this) {
+      return function(err) {
+        if (task.err == null) {
           _this.log.error(err);
-          return _this._deleteTask(task, reject, err);
-        });
+        }
+        _this._deleteTask(task);
+        throw err;
       };
     })(this));
   };
@@ -408,17 +424,17 @@ LayerController = (function(_super) {
         var emits;
         emits = [];
         emits.push(_this.emitAll('make'));
-        return Promise.all(emits).then(function(emits) {
+        return resolve(Promise.all(emits).then(function(emits) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
             if (!success) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
           }
           return _this._make(force).then(function(layer) {
             if (!layer) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
             emits = [];
             emits.push(_this.emitAll('made'));
@@ -427,16 +443,23 @@ LayerController = (function(_super) {
               for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
                 success = emits[_j];
                 if (!success) {
-                  return _this._deleteTask(task, resolve, null);
+                  return _this._deleteTask(task, Promise.resolve, null);
                 }
               }
-              return _this._deleteTask(task, resolve, _this);
+              return _this._deleteTask(task, Promise.resolve, _this);
             });
+          }, function(err) {
+            throw task.err = err;
           });
-        })["catch"](function(err) {
+        }));
+      };
+    })(this))["catch"]((function(_this) {
+      return function(err) {
+        if (task.err == null) {
           _this.log.error(err);
-          return _this._deleteTask(task, reject, err);
-        });
+        }
+        _this._deleteTask(task);
+        throw err;
       };
     })(this));
   };
@@ -451,10 +474,10 @@ LayerController = (function(_super) {
     }
     this.log.debug('findElements');
     if (!node) {
-      throw new Error(this.log.error('findElements: node does not exist'));
+      throw new Error('findElements: node does not exist');
     }
     if (!selectors) {
-      throw new Error(this.log.error('findElements: selectors does not exist'));
+      throw new Error('findElements: selectors does not exist');
     }
     if (node.find && node.html) {
       return node.find(selectors);
@@ -475,10 +498,10 @@ LayerController = (function(_super) {
 
   LayerController.prototype.htmlElements = function(elementList, html) {
     if (!elementList) {
-      throw new Error(this.log.error('htmlElements: elementList does not exist'));
+      throw new Error('htmlElements: elementList does not exist');
     }
-    if (!html) {
-      throw new Error(this.log.error('htmlElements: html does not exist'));
+    if (html == null) {
+      throw new Error('htmlElements: html does not exist');
     }
     if (elementList.html) {
       return elementList.html(html);
@@ -505,19 +528,19 @@ LayerController = (function(_super) {
         var emits;
         emits = [];
         emits.push(_this.emitAll('insert'));
-        return Promise.all(emits).then(function(emits) {
+        return resolve(Promise.all(emits).then(function(emits) {
           var elementList, success, _i, _len, _ref;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
             if (!success) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
           }
           if (!(!force && ((_ref = _this.elementList) != null ? _ref.length : void 0))) {
             _this.elementList = null;
             elementList = _this.findElements();
             if (!(elementList != null ? elementList.length : void 0)) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
             _this.htmlElements(elementList, _this.html);
             _this.elementList = elementList;
@@ -535,14 +558,19 @@ LayerController = (function(_super) {
                 continue;
               }
               _this.elementList = null;
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
-            return _this._deleteTask(task, resolve, _this);
+            return _this._deleteTask(task, Promise.resolve, _this);
           });
-        })["catch"](function(err) {
+        }));
+      };
+    })(this))["catch"]((function(_this) {
+      return function(err) {
+        if (task.err == null) {
           _this.log.error(err);
-          return _this._deleteTask(task, reject, err);
-        });
+        }
+        _this._deleteTask(task);
+        throw err;
       };
     })(this));
   };
@@ -559,7 +587,7 @@ LayerController = (function(_super) {
   };
 
   LayerController.prototype.show = function(force) {
-    var task, _ref;
+    var task, _ref, _ref1;
     if (force == null) {
       force = false;
     }
@@ -570,22 +598,25 @@ LayerController = (function(_super) {
     if (this.isShown && ((_ref = this.elementList) != null ? _ref.length : void 0)) {
       return Promise.resolve(this);
     }
+    if (!(this.parentNode || (this.parentLayer && this.parentLayer.isShown && ((_ref1 = this.parentLayer.elementList) != null ? _ref1.length : void 0)))) {
+      return Promise.resolve(null);
+    }
     return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
         emits = [];
         emits.push(_this.emitAll('show'));
-        return Promise.all(emits).then(function(emits) {
+        return resolve(Promise.all(emits).then(function(emits) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
             if (!success) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
           }
           return _this._show(force).then(function(layer) {
             if (!layer) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
             emits = [];
             emits.push(_this.emitAll('shown'));
@@ -594,65 +625,83 @@ LayerController = (function(_super) {
               for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
                 success = emits[_j];
                 if (!success) {
-                  return _this._deleteTask(task, resolve, null);
+                  return _this._deleteTask(task, Promise.resolve, null);
                 }
               }
               _this.isShown = true;
-              return _this._deleteTask(task, resolve, _this);
+              return _this._deleteTask(task, Promise.resolve, _this);
             });
+          }, function(err) {
+            throw task.err = err;
           });
-        })["catch"](function(err) {
+        }));
+      };
+    })(this))["catch"]((function(_this) {
+      return function(err) {
+        if (task.err == null) {
           _this.log.error(err);
-          return _this._deleteTask(task, reject, err);
-        });
+        }
+        _this._deleteTask(task);
+        throw err;
       };
     })(this));
   };
 
   LayerController.prototype.hideAll = function(force) {
-    var task;
+    var task, _ref;
     if (force == null) {
       force = false;
     }
+    this.log.debug('hideAll', force);
     task = this._task('hideAll', force);
     if (task.run) {
       return task.run;
+    }
+    if (!this.isShown && !((_ref = this.elementList) != null ? _ref.length : void 0) && !force) {
+      return Promise.resolve(this);
     }
     return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
         emits = [];
-        emits.push(_this.emitAll('hide.all', state));
-        return Promise.all(emits).then(function(emits) {
+        emits.push(_this.emitAll('hide.all'));
+        return resolve(Promise.all(emits).then(function(emits) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
             if (!success) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
           }
           return Promise.all(_this.childLayers.map(function(layer) {
             return layer.hideAll(force);
-          }))["catch"](_this.log.error)["finally"](function() {
+          }))["catch"]().then(function() {
             return _this.hide(force).then(function() {
               emits = [];
-              emits.push(_this.emitAll('hidden.all', state));
+              emits.push(_this.emitAll('hidden.all'));
               return Promise.all(emits).then(function(emits) {
                 var _j, _len1;
                 for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
                   success = emits[_j];
                   if (!success) {
-                    return _this._deleteTask(task, resolve, null);
+                    return _this._deleteTask(task, Promise.resolve, null);
                   }
                 }
-                return _this._deleteTask(task, resolve, _this);
+                return _this._deleteTask(task, Promise.resolve, _this);
               });
+            }, function(err) {
+              throw task.err = err;
             });
           });
-        })["catch"](function(err) {
+        }));
+      };
+    })(this))["catch"]((function(_this) {
+      return function(err) {
+        if (task.err == null) {
           _this.log.error(err);
-          return _this._deleteTask(task, reject, err);
-        });
+        }
+        _this._deleteTask(task);
+        throw err;
       };
     })(this));
   };
@@ -662,24 +711,25 @@ LayerController = (function(_super) {
     if (force == null) {
       force = false;
     }
+    this.log.debug('hide', force);
     task = this._task('hide', force);
     if (task.run) {
       return task.run;
     }
     if (!this.isShown && !((_ref = this.elementList) != null ? _ref.length : void 0) && !force) {
-      Promise.resolve(this);
+      return Promise.resolve(this);
     }
     return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
         emits = [];
         emits.push(_this.emitAll('hide'));
-        return Promise.all(emits).then(function(emits) {
+        return resolve(Promise.all(emits).then(function(emits) {
           var success, _i, _len, _ref1;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
             if (!success) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
           }
           if (force && !((_ref1 = _this.elementList) != null ? _ref1.length : void 0)) {
@@ -696,15 +746,20 @@ LayerController = (function(_super) {
             for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
               success = emits[_j];
               if (!success) {
-                return _this._deleteTask(task, resolve, null);
+                return _this._deleteTask(task, Promise.resolve, null);
               }
             }
-            return _this._deleteTask(task, resolve, _this);
+            return _this._deleteTask(task, Promise.resolve, _this);
           });
-        })["catch"](function(err) {
+        }));
+      };
+    })(this))["catch"]((function(_this) {
+      return function(err) {
+        if (task.err == null) {
           _this.log.error(err);
-          return _this._deleteTask(task, reject, err);
-        });
+        }
+        _this._deleteTask(task);
+        throw err;
       };
     })(this));
   };
@@ -721,20 +776,21 @@ LayerController = (function(_super) {
     return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
+        _this.log.debug('stateAll run', state);
         emits = [];
         emits.push(_this.emitAll('state.all', state));
-        return Promise.all(emits).then(function(emits) {
+        return resolve(Promise.all(emits).then(function(emits) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
             if (!success) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
           }
           return _this.state(state).then(function() {
             return Promise.all(_this.childLayers.map(function(layer) {
               return layer.stateAll(state);
-            }))["catch"](_this.log.error)["finally"](function() {
+            }))["catch"]().then(function() {
               emits = [];
               emits.push(_this.emitAll('stated.all', state));
               return Promise.all(emits).then(function(emits) {
@@ -742,17 +798,24 @@ LayerController = (function(_super) {
                 for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
                   success = emits[_j];
                   if (!success) {
-                    return _this._deleteTask(task, resolve, null);
+                    return _this._deleteTask(task, Promise.resolve, null);
                   }
                 }
-                return _this._deleteTask(task, resolve, _this);
+                return _this._deleteTask(task, Promise.resolve, _this);
               });
             });
+          }, function(err) {
+            throw task.err = err;
           });
-        })["catch"](function(err) {
+        }));
+      };
+    })(this))["catch"]((function(_this) {
+      return function(err) {
+        if (task.err == null) {
           _this.log.error(err);
-          return _this._deleteTask(task, reject, err);
-        });
+        }
+        _this._deleteTask(task);
+        throw err;
       };
     })(this));
   };
@@ -808,17 +871,17 @@ LayerController = (function(_super) {
         if (_this.task.state.progress) {
           emits.push(_this.emitAll('state.progress', state));
         }
-        return Promise.all(emits).then(function(emits) {
+        return resolve(Promise.all(emits).then(function(emits) {
           var success, _i, _len;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
             success = emits[_i];
             if (!success) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
           }
           return _this._state(state).then(function(layer) {
             if (!layer) {
-              return _this._deleteTask(task, resolve, null);
+              return _this._deleteTask(task, Promise.resolve, null);
             }
             _this.task.state.last = _this.task.state.current;
             _this.task.state.current = state;
@@ -830,16 +893,23 @@ LayerController = (function(_super) {
               for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
                 success = emits[_j];
                 if (!success) {
-                  return _this._deleteTask(task, resolve, null);
+                  return _this._deleteTask(task, Promise.resolve, null);
                 }
               }
-              return _this._deleteTask(task, resolve, _this);
+              return _this._deleteTask(task, Promise.resolve, _this);
             });
+          }, function(err) {
+            throw task.err = err;
           });
-        })["catch"](function(err) {
+        }));
+      };
+    })(this))["catch"]((function(_this) {
+      return function(err) {
+        if (task.err == null) {
           _this.log.error(err);
-          return _this._deleteTask(task, reject, err);
-        });
+        }
+        _this._deleteTask(task);
+        throw err;
       };
     })(this));
   };
@@ -897,7 +967,7 @@ LayerController = (function(_super) {
       this.layers = this.main.layers;
       this.layers.push(this);
       if (!this.name) {
-        this.name = "" + this.layers.length + "/" + this.parentLayer.childLayers.length;
+        this.name = "" + this.parentLayer.childLayers.length + "(" + this.layers.length + ")";
       }
     } else {
       this.main = this;

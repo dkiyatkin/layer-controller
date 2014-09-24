@@ -45,10 +45,11 @@ class LayerController extends Module
     task = @task[name]
     return task if task.run # если есть выполнение то ничего не делать
     return task if not @_conflictTask[name]?.length
-    conflictTasks = (_task.run for own _name, _task of @task when (@_conflictTask[name].indexOf(_name) isnt -1) and _task.run)
+    conflictTasks =
+      (_task.run for own _name, _task of @task when (@_conflictTask[name].indexOf(_name) isnt -1) and _task.run)
     return task if not conflictTasks.length
 
-    task.run = Promise.all(conflictTasks).finally =>
+    task.run = Promise.all(conflictTasks).catch().then =>
       @_deleteTask(task)
       @[name](type)
 
@@ -76,6 +77,7 @@ class LayerController extends Module
   _deleteTask: (task, fn, arg) ->
     delete task.type
     delete task.run
+    delete task.err
     fn(arg) if fn?
 
   # Тестовый метод слоя, ничего не делает
@@ -91,8 +93,8 @@ class LayerController extends Module
       emits.push(@emitAll('test', testValue))
       emits.push(@emitAll('test.prop', testValue, 42)) if testValue is 24
 
-      Promise.all(emits).then (emits) =>
-        return @_deleteTask(task, resolve, null) for success in emits when not success
+      resolve Promise.all(emits).then (emits) =>
+        return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
         @testCount = 0 if not @testCount?
         @testCount++
         @log.debug('test action')
@@ -101,12 +103,13 @@ class LayerController extends Module
         emits.push(@emitAll('tested.prop', testValue, 42)) if testValue is 24
 
         Promise.all(emits).then (emits) =>
-          return @_deleteTask(task, resolve, null) for success in emits when not success
-          @_deleteTask(task, resolve, this)
+          return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
+          @_deleteTask(task, Promise.resolve, this)
 
-      .catch (err) =>
-        @log.error(err)
-        @_deleteTask(task, reject, err)
+    .catch (err) =>
+      @log.error(err) if not task.err?
+      @_deleteTask(task)
+      throw err
 
   # Рендер шаблона
   # @param {String} tpl Шаблон
@@ -189,25 +192,28 @@ class LayerController extends Module
       emits = []
       emits.push(@emitAll('load'))
 
-      Promise.all(emits).then (emits) =>
-        return @_deleteTask(task, resolve, null) for success in emits when not success
+      resolve Promise.all(emits).then (emits) =>
+        return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
 
         @_load().then =>
           emits = []
           emits.push(@emitAll('loaded'))
 
           Promise.all(emits).then (emits) =>
-            return @_deleteTask(task, resolve, null) for success in emits when not success
-            @_deleteTask(task, resolve, this)
+            return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
+            @_deleteTask(task, Promise.resolve, this)
 
-      .catch (err) =>
-        @log.error(err)
-        @_deleteTask(task, reject, err)
+        # , (err) -> throw task.err = err # _load REVIEW
+
+    .catch (err) =>
+      @log.error(err) if not task.err?
+      @_deleteTask(task)
+      throw err
 
   # Перерисовать всех потомков слоя и затем сам слой
   # @return {Promise} layer
   reparseAll: ->
-    Promise.all(@childLayers.map (layer) -> layer.reparse()).catch(@log.error).finally => # перепарсить дочерние слои сначала
+    Promise.all(@childLayers.map (layer) -> layer.reparse()).catch().then => # перепарсить дочерние слои сначала
       @reparse()
 
   # Перерисовать вставленный слой
@@ -229,8 +235,8 @@ class LayerController extends Module
       emits = []
       emits.push(@emitAll('parse'))
 
-      Promise.all(emits).then (emits) =>
-        return @_deleteTask(task, resolve, null) for success in emits when not success
+      resolve Promise.all(emits).then (emits) =>
+        return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
         @html = @render(@data.tpl)
         emits = []
         emits.push(@emitAll('parsed'))
@@ -238,12 +244,13 @@ class LayerController extends Module
         Promise.all(emits).then (emits) =>
           for success in emits when not success
             @html = null # XXX нужно ли это?
-            return @_deleteTask(task, resolve, null)
-          @_deleteTask(task, resolve, this)
+            return @_deleteTask(task, Promise.resolve, null)
+          @_deleteTask(task, Promise.resolve, this)
 
-      .catch (err) =>
-        @log.error(err)
-        @_deleteTask(task, reject, err)
+    .catch (err) =>
+      @log.error(err) if not task.err?
+      @_deleteTask(task)
+      throw err
 
   # Загрузить, распарсить слой
   # @param {Boolean} force
@@ -270,21 +277,24 @@ class LayerController extends Module
       emits = []
       emits.push(@emitAll('make'))
 
-      Promise.all(emits).then (emits) =>
-        return @_deleteTask(task, resolve, null) for success in emits when not success
+      resolve Promise.all(emits).then (emits) =>
+        return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
 
         @_make(force).then (layer) =>
-          return @_deleteTask(task, resolve, null) if not layer
+          return @_deleteTask(task, Promise.resolve, null) if not layer
           emits = []
           emits.push(@emitAll('made'))
 
           Promise.all(emits).then (emits) =>
-            return @_deleteTask(task, resolve, null) for success in emits when not success
-            @_deleteTask(task, resolve, this)
+            return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
+            @_deleteTask(task, Promise.resolve, this)
 
-      .catch (err) =>
-        @log.error(err)
-        @_deleteTask(task, reject, err)
+        , (err) -> throw task.err = err
+
+    .catch (err) =>
+      @log.error(err) if not task.err?
+      @_deleteTask(task)
+      throw err
 
   # Найти список элементов, если аргументы не переданы ищет список элементов слоя
   # @param {Node|NodeList} node
@@ -292,8 +302,8 @@ class LayerController extends Module
   # @return {NodeList|Array} elementList
   findElements: (node = @parentNode or @parentLayer?.elementList, selectors = @selectors) ->
     @log.debug 'findElements' #, node, selectors
-    throw new Error(@log.error('findElements: node does not exist')) if not node
-    throw new Error(@log.error('findElements: selectors does not exist')) if not selectors
+    throw new Error('findElements: node does not exist') if not node
+    throw new Error('findElements: selectors does not exist') if not selectors
     return node.find(selectors) if node.find and node.html # у массивов может быть свой find
     return _.toArray(node.querySelectorAll(selectors)) if node.querySelectorAll
     throw new Error(@log.error('findElements: bad node')) if not node[0]?.querySelectorAll
@@ -306,8 +316,8 @@ class LayerController extends Module
   # @param {NodeList} elementList
   # @param {String} html
   htmlElements: (elementList, html) ->
-    throw new Error(@log.error('htmlElements: elementList does not exist')) if not elementList
-    throw new Error(@log.error('htmlElements: html does not exist')) if not html
+    throw new Error('htmlElements: elementList does not exist') if not elementList
+    throw new Error('htmlElements: html does not exist') if not html?
     return elementList.html(html) if elementList.html
 
     Array::forEach.call elementList, (element) ->
@@ -325,12 +335,12 @@ class LayerController extends Module
       emits = []
       emits.push(@emitAll('insert'))
 
-      Promise.all(emits).then (emits) =>
-        return @_deleteTask(task, resolve, null) for success in emits when not success
+      resolve Promise.all(emits).then (emits) =>
+        return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
         unless not force and @elementList?.length
           @elementList = null
           elementList = @findElements()
-          return @_deleteTask(task, resolve, null) if not elementList?.length
+          return @_deleteTask(task, Promise.resolve, null) if not elementList?.length
           @htmlElements(elementList, @html)
           @elementList = elementList
         emits = []
@@ -342,12 +352,13 @@ class LayerController extends Module
         Promise.all(emits).then (emits) =>
           for success in emits when not success
             @elementList = null
-            return @_deleteTask(task, resolve, null)
-          @_deleteTask(task, resolve, this)
+            return @_deleteTask(task, Promise.resolve, null)
+          @_deleteTask(task, Promise.resolve, this)
 
-      .catch (err) =>
-        @log.error(err)
-        @_deleteTask(task, reject, err)
+    .catch (err) =>
+      @log.error(err) if not task.err?
+      @_deleteTask(task)
+      throw err
 
   # Приготовить, вставить если нужно
   # @return {Promise} layer
@@ -363,70 +374,82 @@ class LayerController extends Module
     task = @_task('show', force)
     return task.run if task.run
     return Promise.resolve(this) if @isShown and @elementList?.length
+    return Promise.resolve(null) unless @parentNode or (@parentLayer and @parentLayer.isShown and @parentLayer.elementList?.length)
+    # return Promise.resolve(this) if @isShown
+    # return Promise.resolve(null) if @parentLayer and not @parentLayer.isShown
 
     task.run = new Promise (resolve, reject) =>
       emits = []
       emits.push(@emitAll('show'))
 
-      Promise.all(emits).then (emits) =>
-        return @_deleteTask(task, resolve, null) for success in emits when not success
+      resolve Promise.all(emits).then (emits) =>
+        return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
 
         @_show(force).then (layer) =>
-          return @_deleteTask(task, resolve, null) if not layer
+          return @_deleteTask(task, Promise.resolve, null) if not layer
           emits = []
           # emits.push(@emitAll('showed'))
           emits.push(@emitAll('shown'))
 
           Promise.all(emits).then (emits) =>
-            return @_deleteTask(task, resolve, null) for success in emits when not success
+            return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
             @isShown = true
-            @_deleteTask(task, resolve, this)
+            @_deleteTask(task, Promise.resolve, this)
 
-      .catch (err) =>
-        @log.error(err)
-        @_deleteTask(task, reject, err)
+        , (err) -> throw task.err = err
+
+    .catch (err) =>
+      @log.error(err) if not task.err?
+      @_deleteTask(task)
+      throw err
 
   # Скрыть все дочерние слои начиная с последнего и затем скрыть сам слой
   # @param {Boolean} force Пытаться скрыть даже если слой уже скрыт
   # @return {Promise} layer
   hideAll: (force = false) ->
+    @log.debug('hideAll', force)
     task = @_task('hideAll', force)
     return task.run if task.run
+    return Promise.resolve(this) if not @isShown and not @elementList?.length and not force
 
     task.run = new Promise (resolve, reject) =>
       emits = []
-      emits.push(@emitAll('hide.all', state))
+      emits.push(@emitAll('hide.all'))
 
-      Promise.all(emits).then (emits) =>
-        return @_deleteTask(task, resolve, null) for success in emits when not success
+      resolve Promise.all(emits).then (emits) =>
+        return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
 
-        Promise.all(@childLayers.map (layer) -> layer.hideAll(force)).catch(@log.error).finally =>
+        Promise.all(@childLayers.map (layer) -> layer.hideAll(force)).catch().then =>
           @hide(force).then =>
             emits = []
-            emits.push(@emitAll('hidden.all', state))
+            emits.push(@emitAll('hidden.all'))
 
             Promise.all(emits).then (emits) =>
-              return @_deleteTask(task, resolve, null) for success in emits when not success
-              @_deleteTask(task, resolve, this)
+              return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
+              @_deleteTask(task, Promise.resolve, this)
 
-      .catch (err) =>
-        @log.error(err)
-        @_deleteTask(task, reject, err)
+          , (err) -> throw task.err = err
+
+    .catch (err) =>
+      @log.error(err) if not task.err?
+      @_deleteTask(task)
+      throw err
 
   # Скрыть слой
   # @param {Boolean} force Пытаться скрыть даже если слой уже скрыт, и заново найти layer.elementList если его нету
   # @return {Promise} layer
   hide: (force = false) ->
+    @log.debug('hide', force)
     task = @_task('hide', force)
     return task.run if task.run
-    Promise.resolve(this) if not @isShown and not @elementList?.length and not force
+    return Promise.resolve(this) if not @isShown and not @elementList?.length and not force
 
     task.run = new Promise (resolve, reject) =>
       emits = []
       emits.push(@emitAll('hide'))
 
-      Promise.all(emits).then (emits) =>
-        return @_deleteTask(task, resolve, null) for success in emits when not success
+      resolve Promise.all(emits).then (emits) =>
+        return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
 
         if force and not @elementList?.length
           @htmlElements(@findElements(), '')
@@ -438,12 +461,13 @@ class LayerController extends Module
         emits.push(@emitAll('hidden'))
 
         Promise.all(emits).then (emits) =>
-          return @_deleteTask(task, resolve, null) for success in emits when not success
-          @_deleteTask(task, resolve, this)
+          return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
+          @_deleteTask(task, Promise.resolve, this)
 
-      .catch (err) =>
-        @log.error(err)
-        @_deleteTask(task, reject, err)
+    .catch (err) =>
+      @log.error(err) if not task.err?
+      @_deleteTask(task)
+      throw err
 
   # Привести слой к состоянию и рекурсивно привести все дочерние слои к состоянию
   # @param {String} state Состояние для слоя
@@ -453,29 +477,33 @@ class LayerController extends Module
     return task.run if task.run
 
     task.run = new Promise (resolve, reject) =>
+      @log.debug('stateAll run', state)
       emits = []
       emits.push(@emitAll('state.all', state))
 
-      Promise.all(emits).then (emits) =>
-        return @_deleteTask(task, resolve, null) for success in emits when not success
+      resolve Promise.all(emits).then (emits) =>
+        return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
 
         @state(state).then =>
-          Promise.all(@childLayers.map (layer) -> layer.stateAll(state)).catch(@log.error).finally =>
+          Promise.all(@childLayers.map (layer) -> layer.stateAll(state)).catch().then =>
             emits = []
             emits.push(@emitAll('stated.all', state))
 
             Promise.all(emits).then (emits) =>
-              return @_deleteTask(task, resolve, null) for success in emits when not success
-              @_deleteTask(task, resolve, this)
+              return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
+              @_deleteTask(task, Promise.resolve, this)
 
-      .catch (err) =>
-        @log.error(err)
-        @_deleteTask(task, reject, err)
+        , (err) -> throw task.err = err
+
+    .catch (err) =>
+      @log.error(err) if not task.err?
+      @_deleteTask(task)
+      throw err
 
   # Скрыть или показать слой в зависимости от состояния layer.regState
   # @param {String} state Состояние для слоя
   # @return {Promise} layer
-  _state: (state) ->
+  _state: (state) -> # XXX возврат ошибки только от заданий
     return Promise.resolve(this) if not @selectors # XXX layer.selectors не очень очевидно
     return @hideAll() unless not @regState or (state.search(@regState) != -1)
     # delete @isShown # XXX нужно или нет?
@@ -507,11 +535,11 @@ class LayerController extends Module
       emits.push(@emitAll('state.different', state)) if not @task.state.equal # состояния разные
       emits.push(@emitAll('state.progress', state)) if @task.state.progress # не в первый раз и состояния разные
 
-      Promise.all(emits).then (emits) =>
-        return @_deleteTask(task, resolve, null) for success in emits when not success
+      resolve Promise.all(emits).then (emits) =>
+        return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
 
         @_state(state).then (layer) =>
-          return @_deleteTask(task, resolve, null) if not layer # слой не вставился или не скрылся
+          return @_deleteTask(task, Promise.resolve, null) if not layer # слой не вставился или не скрылся
           @task.state.last = @task.state.current
           @task.state.current = state
           delete @task.state.next
@@ -519,12 +547,15 @@ class LayerController extends Module
           emits.push(@emitAll('stated', state))
 
           Promise.all(emits).then (emits) =>
-            return @_deleteTask(task, resolve, null) for success in emits when not success
-            @_deleteTask(task, resolve, this)
+            return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
+            @_deleteTask(task, Promise.resolve, this)
 
-      .catch (err) =>
-        @log.error(err)
-        @_deleteTask(task, reject, err)
+        , (err) -> throw task.err = err
+
+    .catch (err) =>
+      @log.error(err) if not task.err?
+      @_deleteTask(task)
+      throw err
 
   # Очистка слоя от временных данных
   # @param {String|Boolean} cacheKey
@@ -564,7 +595,7 @@ class LayerController extends Module
       @request = @main.request
       @layers = @main.layers
       @layers.push(this)
-      @name = "#{@layers.length}/#{@parentLayer.childLayers.length}" if not @name
+      @name = "#{@parentLayer.childLayers.length}(#{@layers.length})" if not @name
     else # main слой без parentLayer
       @main = this
       @parentNode = document if document?
