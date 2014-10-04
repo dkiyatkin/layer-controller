@@ -31,11 +31,14 @@ class LayerController extends Module
   # Список конфликтующих заданий
   _conflictTask:
     'stateAll': ['state', 'hideAll', 'hide', 'show', 'insert']
-    'state': ['hideAll', 'hide', 'show', 'insert']
+    'state': ['hideAll', 'hide', 'show', 'insert', 'reset']
     'hideAll': ['hide', 'show', 'insert']
-    'hide': ['show', 'insert']
-    'show': ['hideAll', 'hide', 'insert']
-    'insert': ['hideAll', 'hide']
+    'hide': ['show', 'insert', 'reset']
+    'show': ['hideAll', 'hide', 'insert', 'reset']
+    'insert': ['hideAll', 'hide', 'reset']
+    'load': ['reset']
+    'parse': ['reset']
+    'reset': ['hide', 'show', 'insert', 'load', 'parse']
 
   # Разрешение несовместимых заданий
   # @param {String} name Имя функции, задание
@@ -52,6 +55,8 @@ class LayerController extends Module
     task.run = Promise.all(conflictTasks).catch().then =>
       @_deleteTask(task)
       @[name](type)
+
+    task
 
   # Определить задание, только разные задания могут выполнятся одновременно
   # Одни задания разного типа выполняются друг за другом
@@ -117,6 +122,14 @@ class LayerController extends Module
   render: (tpl) ->
     _.template(tpl, this)
 
+  # Получить на основе неполного пути полный путь, который будет скачиваться и запишется в кэш
+  # @param {String} path
+  # @return {String} path
+  _originPath: (path) ->
+    if @request.origin and path.search('//') isnt 0 and path.search('/') is 0 # относительные пути не поддерживаются
+      path = @request.origin + path
+    path
+
   # Загрузить данные для слоя
   # @param {String|Array|Object} path данные для загрузки
   # @param {Object} data Объект для сохранения
@@ -134,8 +147,7 @@ class LayerController extends Module
       data = @data
     if _.isString(path)
       path = @render(path)
-      if @request.origin and path.search('//') isnt 0 and path.search('/') is 0 # относительные пути не поддерживаются
-        path = @request.origin + path
+      path = @_originPath(path)
       if @request.cache[path]
         return Promise.resolve(@request.cache[path]) if not (key? and data)
         data[key] = @request.cache[path]
@@ -210,17 +222,30 @@ class LayerController extends Module
       @_deleteTask(task)
       throw err
 
-  # Перерисовать всех потомков слоя и затем сам слой
+  # Перерисовать слой и затем всех потомков
+  # @param {Boolean} force
   # @return {Promise} layer
-  reparseAll: ->
-    Promise.all(@childLayers.map (layer) -> layer.reparse()).catch().then => # перепарсить дочерние слои сначала
-      @reparse()
+  reparseAll: (force) ->
+    @reparse(force).then (layer) =>
+      # return null if not layer # XXX нужно ли это?
 
-  # Перерисовать вставленный слой
+      Promise.all(@childLayers.map (layer) -> layer.reparse(force)).catch().then =>
+        this
+
+  # Перерисовать слой
+  # @param {Boolean} force Скрывать и показывать слой
   # @return {Promise} layer
-  reparse: ->
-    return Promise.resolve(null) if not @elementList?.length # layer.isShown не важно
-    @_show(true)
+  reparse: (force) ->
+    if not @elementList?.length or not @isShown
+      return Promise.resolve(null) if not force
+
+      return @show(true).then (layer) =>
+        return layer if layer
+        @hideAll().then => layer
+
+    @_show(true).then (layer) =>
+      return layer if layer or not force
+      @hideAll().then => layer
 
   # Распарсить шаблон (layer.data.tpl) слоя в html (layer.html)
   # @param {Boolean} force Парсить даже если есть layer.html
@@ -301,7 +326,7 @@ class LayerController extends Module
   # @param {String} selectors
   # @return {NodeList|Array} elementList
   findElements: (node = @parentNode or @parentLayer?.elementList, selectors = @selectors) ->
-    @log.debug 'findElements' #, node, selectors
+    # @log.debug 'findElements' #, node, selectors
     throw new Error('findElements: node does not exist') if not node
     throw new Error('findElements: selectors does not exist') if not selectors
     return node.find(selectors) if node.find and node.html # у массивов может быть свой find
@@ -334,6 +359,7 @@ class LayerController extends Module
     task.run = new Promise (resolve, reject) =>
       emits = []
       emits.push(@emitAll('insert'))
+      emits.push(@emitAll('insert.window')) if window?
 
       resolve Promise.all(emits).then (emits) =>
         return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
@@ -390,6 +416,7 @@ class LayerController extends Module
           emits = []
           # emits.push(@emitAll('showed'))
           emits.push(@emitAll('shown'))
+          emits.push(@emitAll('shown.window')) if window?
 
           Promise.all(emits).then (emits) =>
             return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
@@ -459,6 +486,7 @@ class LayerController extends Module
         @elementList = null
         emits = []
         emits.push(@emitAll('hidden'))
+        emits.push(@emitAll('hidden.window')) if window?
 
         Promise.all(emits).then (emits) =>
           return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
@@ -477,7 +505,7 @@ class LayerController extends Module
     return task.run if task.run
 
     task.run = new Promise (resolve, reject) =>
-      @log.debug('stateAll run', state)
+      # @log.debug('stateAll run', state)
       emits = []
       emits.push(@emitAll('state.all', state))
 
@@ -525,15 +553,24 @@ class LayerController extends Module
         task.run = @state(state)
 
     task.run = new Promise (resolve, reject) =>
-      @log.debug('state run')
+      # @log.debug('state run')
       @task.state.next = state
       @task.state.equal = (if @task.state.current is @task.state.next then true else false)
       @task.state.progress = (if @task.state.current? and not @task.state.equal then true else false)
+      @task.state.nofirst = @task.state.current? # не в первый раз
       emits = []
       emits.push(@emitAll('state', state))
-      emits.push(@emitAll('state.next', state)) if @task.state.current? # не в первый раз
-      emits.push(@emitAll('state.different', state)) if not @task.state.equal # состояния разные
-      emits.push(@emitAll('state.progress', state)) if @task.state.progress # не в первый раз и состояния разные
+      emits.push(@emitAll('state.window', state)) if window?
+      emits.push(@emitAll('state.next', state)) if @task.state.nofirst # не в первый раз
+      if @task.state.equal # состояния одинаковые
+        emits.push(@emitAll('state.equal', state))
+        emits.push(@emitAll('state.equal.window', state)) if window?
+      else # состояния разные
+        emits.push(@emitAll('state.different', state))
+        emits.push(@emitAll('state.different.window', state)) if window?
+      if @task.state.progress # не в первый раз и состояния разные
+        emits.push(@emitAll('state.progress', state))
+        emits.push(@emitAll('state.progress.window', state)) if window?
 
       resolve Promise.all(emits).then (emits) =>
         return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
@@ -545,6 +582,9 @@ class LayerController extends Module
           delete @task.state.next
           emits = []
           emits.push(@emitAll('stated', state))
+          if @task.state.nofirst # не в первый раз
+            emits.push(@emitAll('stated.next', state))
+            emits.push(@emitAll('stated.next.window', state)) if window?
 
           Promise.all(emits).then (emits) =>
             return @_deleteTask(task, Promise.resolve, null) for success in emits when not success
@@ -560,7 +600,7 @@ class LayerController extends Module
   # Очистка слоя от временных данных
   # @param {String|Boolean} cacheKey
   # @return {Boolean} success
-  reset: (cacheKey) ->
+  _reset: (cacheKey) ->
     delete @html
     delete @elementList # слой может быть isShown, но elementList сбрасываем
     delete @data
@@ -569,6 +609,7 @@ class LayerController extends Module
     if _.isString(cacheKey)
       path = @render(@download[cacheKey])
       return false if not path
+      path = @_originPath(path)
       delete @_data[path]
       delete @request.cache[path]
       return true
@@ -578,6 +619,22 @@ class LayerController extends Module
         delete @request.cache[path]
       return true
     false
+
+  # Очистка слоя от временных данных
+  # @param {String|Boolean} cacheKey
+  # @return {Promise} success
+  reset: (cacheKey) ->
+    task = @_task('reset', cacheKey)
+    return task.run if task.run
+
+    task.run = new Promise (resolve, reject) =>
+      process.nextTick =>
+        @_deleteTask(task, resolve, @_reset(cacheKey))
+
+    .catch (err) =>
+      @log.error(err) if not task.err?
+      @_deleteTask(task)
+      throw err
 
   # Получить полное имя слоя
   # @return {String} name
@@ -611,7 +668,7 @@ class LayerController extends Module
       @main.layers = [this]
       @main.name = parentLayer?.name or @main.name or 'main'
     @log = new Log(this)
-    @log.debug('new')
+    # @log.debug('new')
     @task = {}
     @config = {}
     @rel = {}

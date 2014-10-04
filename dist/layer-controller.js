@@ -54,11 +54,14 @@ LayerController = (function(_super) {
 
   LayerController.prototype._conflictTask = {
     'stateAll': ['state', 'hideAll', 'hide', 'show', 'insert'],
-    'state': ['hideAll', 'hide', 'show', 'insert'],
+    'state': ['hideAll', 'hide', 'show', 'insert', 'reset'],
     'hideAll': ['hide', 'show', 'insert'],
-    'hide': ['show', 'insert'],
-    'show': ['hideAll', 'hide', 'insert'],
-    'insert': ['hideAll', 'hide']
+    'hide': ['show', 'insert', 'reset'],
+    'show': ['hideAll', 'hide', 'insert', 'reset'],
+    'insert': ['hideAll', 'hide', 'reset'],
+    'load': ['reset'],
+    'parse': ['reset'],
+    'reset': ['hide', 'show', 'insert', 'load', 'parse']
   };
 
   LayerController.prototype._afterConflictTask = function(name, type) {
@@ -86,12 +89,13 @@ LayerController = (function(_super) {
     if (!conflictTasks.length) {
       return task;
     }
-    return task.run = Promise.all(conflictTasks)["catch"]().then((function(_this) {
+    task.run = Promise.all(conflictTasks)["catch"]().then((function(_this) {
       return function() {
         _this._deleteTask(task);
         return _this[name](type);
       };
     })(this));
+    return task;
   };
 
   LayerController.prototype._task = function(name, type) {
@@ -182,6 +186,13 @@ LayerController = (function(_super) {
     return _.template(tpl, this);
   };
 
+  LayerController.prototype._originPath = function(path) {
+    if (this.request.origin && path.search('//') !== 0 && path.search('/') === 0) {
+      path = this.request.origin + path;
+    }
+    return path;
+  };
+
   LayerController.prototype._load = function(path, key, data) {
     var paths, _key, _path;
     if (!this.data) {
@@ -200,9 +211,7 @@ LayerController = (function(_super) {
     }
     if (_.isString(path)) {
       path = this.render(path);
-      if (this.request.origin && path.search('//') !== 0 && path.search('/') === 0) {
-        path = this.request.origin + path;
-      }
+      path = this._originPath(path);
       if (this.request.cache[path]) {
         if (!((key != null) && data)) {
           return Promise.resolve(this.request.cache[path]);
@@ -317,22 +326,45 @@ LayerController = (function(_super) {
     })(this));
   };
 
-  LayerController.prototype.reparseAll = function() {
-    return Promise.all(this.childLayers.map(function(layer) {
-      return layer.reparse();
-    }))["catch"]().then((function(_this) {
-      return function() {
-        return _this.reparse();
+  LayerController.prototype.reparseAll = function(force) {
+    return this.reparse(force).then((function(_this) {
+      return function(layer) {
+        return Promise.all(_this.childLayers.map(function(layer) {
+          return layer.reparse(force);
+        }))["catch"]().then(function() {
+          return _this;
+        });
       };
     })(this));
   };
 
-  LayerController.prototype.reparse = function() {
+  LayerController.prototype.reparse = function(force) {
     var _ref;
-    if (!((_ref = this.elementList) != null ? _ref.length : void 0)) {
-      return Promise.resolve(null);
+    if (!((_ref = this.elementList) != null ? _ref.length : void 0) || !this.isShown) {
+      if (!force) {
+        return Promise.resolve(null);
+      }
+      return this.show(true).then((function(_this) {
+        return function(layer) {
+          if (layer) {
+            return layer;
+          }
+          return _this.hideAll().then(function() {
+            return layer;
+          });
+        };
+      })(this));
     }
-    return this._show(true);
+    return this._show(true).then((function(_this) {
+      return function(layer) {
+        if (layer || !force) {
+          return layer;
+        }
+        return _this.hideAll().then(function() {
+          return layer;
+        });
+      };
+    })(this));
   };
 
   LayerController.prototype.parse = function(force) {
@@ -472,7 +504,6 @@ LayerController = (function(_super) {
     if (selectors == null) {
       selectors = this.selectors;
     }
-    this.log.debug('findElements');
     if (!node) {
       throw new Error('findElements: node does not exist');
     }
@@ -528,6 +559,9 @@ LayerController = (function(_super) {
         var emits;
         emits = [];
         emits.push(_this.emitAll('insert'));
+        if (typeof window !== "undefined" && window !== null) {
+          emits.push(_this.emitAll('insert.window'));
+        }
         return resolve(Promise.all(emits).then(function(emits) {
           var elementList, success, _i, _len, _ref;
           for (_i = 0, _len = emits.length; _i < _len; _i++) {
@@ -620,6 +654,9 @@ LayerController = (function(_super) {
             }
             emits = [];
             emits.push(_this.emitAll('shown'));
+            if (typeof window !== "undefined" && window !== null) {
+              emits.push(_this.emitAll('shown.window'));
+            }
             return Promise.all(emits).then(function(emits) {
               var _j, _len1;
               for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
@@ -741,6 +778,9 @@ LayerController = (function(_super) {
           _this.elementList = null;
           emits = [];
           emits.push(_this.emitAll('hidden'));
+          if (typeof window !== "undefined" && window !== null) {
+            emits.push(_this.emitAll('hidden.window'));
+          }
           return Promise.all(emits).then(function(emits) {
             var _j, _len1;
             for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
@@ -776,7 +816,6 @@ LayerController = (function(_super) {
     return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
-        _this.log.debug('stateAll run', state);
         emits = [];
         emits.push(_this.emitAll('state.all', state));
         return resolve(Promise.all(emits).then(function(emits) {
@@ -856,20 +895,34 @@ LayerController = (function(_super) {
     return task.run = new Promise((function(_this) {
       return function(resolve, reject) {
         var emits;
-        _this.log.debug('state run');
         _this.task.state.next = state;
         _this.task.state.equal = (_this.task.state.current === _this.task.state.next ? true : false);
         _this.task.state.progress = ((_this.task.state.current != null) && !_this.task.state.equal ? true : false);
+        _this.task.state.nofirst = _this.task.state.current != null;
         emits = [];
         emits.push(_this.emitAll('state', state));
-        if (_this.task.state.current != null) {
+        if (typeof window !== "undefined" && window !== null) {
+          emits.push(_this.emitAll('state.window', state));
+        }
+        if (_this.task.state.nofirst) {
           emits.push(_this.emitAll('state.next', state));
         }
-        if (!_this.task.state.equal) {
+        if (_this.task.state.equal) {
+          emits.push(_this.emitAll('state.equal', state));
+          if (typeof window !== "undefined" && window !== null) {
+            emits.push(_this.emitAll('state.equal.window', state));
+          }
+        } else {
           emits.push(_this.emitAll('state.different', state));
+          if (typeof window !== "undefined" && window !== null) {
+            emits.push(_this.emitAll('state.different.window', state));
+          }
         }
         if (_this.task.state.progress) {
           emits.push(_this.emitAll('state.progress', state));
+          if (typeof window !== "undefined" && window !== null) {
+            emits.push(_this.emitAll('state.progress.window', state));
+          }
         }
         return resolve(Promise.all(emits).then(function(emits) {
           var success, _i, _len;
@@ -888,6 +941,12 @@ LayerController = (function(_super) {
             delete _this.task.state.next;
             emits = [];
             emits.push(_this.emitAll('stated', state));
+            if (_this.task.state.nofirst) {
+              emits.push(_this.emitAll('stated.next', state));
+              if (typeof window !== "undefined" && window !== null) {
+                emits.push(_this.emitAll('stated.next.window', state));
+              }
+            }
             return Promise.all(emits).then(function(emits) {
               var _j, _len1;
               for (_j = 0, _len1 = emits.length; _j < _len1; _j++) {
@@ -914,7 +973,7 @@ LayerController = (function(_super) {
     })(this));
   };
 
-  LayerController.prototype.reset = function(cacheKey) {
+  LayerController.prototype._reset = function(cacheKey) {
     var data, path, _ref;
     delete this.html;
     delete this.elementList;
@@ -930,6 +989,7 @@ LayerController = (function(_super) {
       if (!path) {
         return false;
       }
+      path = this._originPath(path);
       delete this._data[path];
       delete this.request.cache[path];
       return true;
@@ -945,6 +1005,29 @@ LayerController = (function(_super) {
       return true;
     }
     return false;
+  };
+
+  LayerController.prototype.reset = function(cacheKey) {
+    var task;
+    task = this._task('reset', cacheKey);
+    if (task.run) {
+      return task.run;
+    }
+    return task.run = new Promise((function(_this) {
+      return function(resolve, reject) {
+        return process.nextTick(function() {
+          return _this._deleteTask(task, resolve, _this._reset(cacheKey));
+        });
+      };
+    })(this))["catch"]((function(_this) {
+      return function(err) {
+        if (task.err == null) {
+          _this.log.error(err);
+        }
+        _this._deleteTask(task);
+        throw err;
+      };
+    })(this));
   };
 
   LayerController.prototype.getFullName = function() {
@@ -985,7 +1068,6 @@ LayerController = (function(_super) {
       this.main.name = (parentLayer != null ? parentLayer.name : void 0) || this.main.name || 'main';
     }
     this.log = new Log(this);
-    this.log.debug('new');
     this.task = {};
     this.config = {};
     this.rel = {};
