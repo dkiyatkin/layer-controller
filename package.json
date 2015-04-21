@@ -10,12 +10,20 @@
     "test": "gulp test",
     "make": "gulp make"
   },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/dkiyatkin/layer-controller.git"
+  },
   "keywords": [
     "layer",
     "controller"
   ],
   "author": "Dmitriy Kiyatkin <info@dkiyatkin.com> (http://dkiyatkin.com)",
   "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/dkiyatkin/layer-controller/issues"
+  },
+  "homepage": "https://github.com/dkiyatkin/layer-controller",
   "devDependencies": {
     "cheerio": "^0.17.0",
     "coffee-script": "^1.8.0",
