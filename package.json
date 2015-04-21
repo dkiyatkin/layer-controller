@@ -1,6 +1,6 @@
 {
   "name": "layer-controller",
-  "version": "0.0.1",
+  "version": "0.0.4",
   "description": "JavaScript layer controller. Manage layers.",
   "main": "./dist/layer-controller.js",
   "directories": {
